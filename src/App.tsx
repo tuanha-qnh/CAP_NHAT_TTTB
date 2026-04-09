@@ -386,6 +386,23 @@ export default function App() {
                 </Button>
               </form>
 
+              <div className="mt-4 p-4 bg-red-50 border border-red-100 rounded-lg">
+                <ul className="text-red-600 font-bold text-sm leading-relaxed list-none space-y-2">
+                  <li className="flex gap-2">
+                    <span>•</span>
+                    <span>Lưu ý chỉ nhập các số điện thoại nằm trong danh sách giao về cho các đơn vị thực hiện. Hệ thống không hỗ trợ tra cứu các số thuê bao nằm ngoài danh sách giao về cho các đơn vị.</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span>•</span>
+                    <span>Hãy bấm nút "Cập nhật dữ liệu mới nhất" trước khi tra cứu nhé!</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span>•</span>
+                    <span>Dữ liệu tra cứu là dữ liệu offline và được update 2 lần/ngày nên có thể các thuê bao vừa thực hiện cập nhật sẽ có trạng thái là "Chưa cập nhật", bạn hãy chờ sau 1 ngày rồi kiểm tra nhé!</span>
+                  </li>
+                </ul>
+              </div>
+
               <div className="mt-4 flex justify-end">
                 <Button 
                   variant="outline" 
