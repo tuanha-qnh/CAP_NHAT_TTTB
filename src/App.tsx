@@ -366,42 +366,33 @@ export default function App() {
 
           {/* Admin Section */}
           <div className="pt-8">
-            {!user ? (
-              <div className="flex justify-center">
-                <Button variant="outline" onClick={handleGoogleLogin} className="gap-2">
-                  <User className="w-4 h-4" />
-                  Đăng nhập Admin (Google)
-                </Button>
-              </div>
-            ) : !isUserAdmin ? (
-              <div className="text-center space-y-2">
-                <p className="text-slate-500">Bạn không có quyền truy cập Admin.</p>
-                <Button variant="ghost" size="sm" onClick={() => signOut(auth)}>Đăng xuất</Button>
-              </div>
-            ) : !isAdminVerified ? (
+            {!isAdminVerified ? (
               <Card className="max-w-md mx-auto shadow-lg border-blue-100">
                 <CardHeader>
                   <CardTitle className="text-center flex items-center justify-center gap-2">
                     <Lock className="w-5 h-5 text-blue-600" />
-                    Xác thực mật khẩu Admin
+                    Đăng nhập Admin
                   </CardTitle>
+                  <CardDescription className="text-center">Nhập mật khẩu hệ thống để quản lý dữ liệu</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <form onSubmit={verifyAdminPassword} className="space-y-4">
                     <div className="space-y-2">
-                      <Label>Nhập mật khẩu để tiếp tục</Label>
+                      <Label>Mật khẩu Admin</Label>
                       <Input 
                         type="password" 
                         value={adminPasswordInput}
                         onChange={(e) => setAdminPasswordInput(e.target.value)}
-                        placeholder="Mật khẩu"
+                        placeholder="Nhập mật khẩu (mặc định: admin)"
                         autoFocus
                       />
                     </div>
                     <Button type="submit" className="w-full bg-blue-600">Xác nhận</Button>
-                    <Button type="button" variant="ghost" className="w-full" onClick={() => signOut(auth)}>Đăng xuất</Button>
                   </form>
                 </CardContent>
+                <CardFooter className="justify-center border-t border-slate-50 pt-4">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-widest">Secure Admin Access</p>
+                </CardFooter>
               </Card>
             ) : (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
@@ -417,7 +408,7 @@ export default function App() {
                       </div>
                       <Button variant="ghost" size="sm" onClick={() => setIsAdminVerified(false)} className="text-slate-500">
                         <LogOut className="w-4 h-4 mr-2" />
-                        Khóa Admin
+                        Thoát Admin
                       </Button>
                     </div>
                   </CardHeader>
@@ -426,7 +417,7 @@ export default function App() {
                     <div className="space-y-2 p-4 bg-slate-50 rounded-lg border border-slate-100">
                       <Label className="flex items-center gap-2">
                         <Lock className="w-4 h-4" />
-                        Đổi mật khẩu Admin
+                        Đổi mật khẩu Admin (Lưu vào CSDL)
                       </Label>
                       <Input 
                         type="password"
