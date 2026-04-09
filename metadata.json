@@ -1,0 +1,5 @@
+{
+  "name": "Tra cứu thông tin thuê bao Vinaphone",
+  "description": "Ứng dụng tra cứu kết quả cập nhật thông tin thuê bao di động Vinaphone từ dữ liệu Google Sheets.",
+  "requestFramePermissions": []
+}
