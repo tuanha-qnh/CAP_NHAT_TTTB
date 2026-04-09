@@ -78,6 +78,20 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Initial Load
+  useEffect(() => {
+    const testConnection = async () => {
+      try {
+        await getDoc(doc(db, "settings", "main"));
+        console.log("Firebase connection successful");
+      } catch (err: any) {
+        console.error("Firebase connection error:", err);
+        setError("Lỗi kết nối Firebase: " + err.message);
+      }
+    };
+    testConnection();
+  }, []);
+
   // Listen for Config Changes
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, "settings", "main"), (snapshot) => {
@@ -185,6 +199,21 @@ export default function App() {
     }
   };
 
+  // Save Config Only
+  const handleSaveOnly = async () => {
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await setDoc(doc(db, "settings", "main"), config);
+      setSuccess("Đã lưu cấu hình thành công.");
+    } catch (err: any) {
+      setError("Lỗi lưu cấu hình: " + err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Import Data to Firestore
   const handleImport = async () => {
     if (!config.phoneColumn || !config.statusColumn) {
@@ -193,13 +222,26 @@ export default function App() {
     }
 
     const sheetId = getSheetId(config.sheetUrl);
+    if (!sheetId) {
+      setError("Link Google Sheet không hợp lệ.");
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     setSuccess(null);
 
     try {
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&usp=sharing`;
       const response = await fetch(csvUrl);
+      
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("text/html")) {
+        setError("Lỗi: Google Sheet trả về trang HTML. Hãy kiểm tra lại quyền chia sẻ (Phải là 'Bất kỳ ai có liên kết đều có thể xem').");
+        setIsLoading(false);
+        return;
+      }
+
       const csvText = await response.text();
       
       Papa.parse(csvText, {
@@ -207,9 +249,13 @@ export default function App() {
         skipEmptyLines: true,
         complete: async (results) => {
           const rows = results.data as any[];
+          if (rows.length === 0) {
+            setError("Không có dữ liệu trong Sheet.");
+            setIsLoading(false);
+            return;
+          }
+
           let count = 0;
-          
-          // Firestore Batch Write (Max 500 per batch)
           const chunks = [];
           for (let i = 0; i < rows.length; i += 500) {
             chunks.push(rows.slice(i, i + 500));
@@ -222,12 +268,12 @@ export default function App() {
               const status = row[config.statusColumn];
               
               if (phone) {
-                const last9 = getLast9Digits(phone);
+                const last9 = getLast9Digits(String(phone));
                 const docRef = doc(db, "subscribers", last9);
                 batch.set(docRef, {
                   last9Digits: last9,
-                  fullPhoneNumber: phone,
-                  status: status || "N/A"
+                  fullPhoneNumber: String(phone),
+                  status: String(status || "N/A")
                 });
                 count++;
               }
@@ -238,12 +284,16 @@ export default function App() {
           // Save Config
           await setDoc(doc(db, "settings", "main"), config);
           
-          setSuccess(`Đã import thành công ${count} bản ghi.`);
+          setSuccess(`Đã import thành công ${count} bản ghi vào CSDL Firebase.`);
+          setIsLoading(false);
+        },
+        error: (err: any) => {
+          setError("Lỗi xử lý dữ liệu: " + err.message);
           setIsLoading(false);
         }
       });
     } catch (err: any) {
-      setError("Lỗi import: " + err.message);
+      setError("Lỗi kết nối: " + err.message);
       setIsLoading(false);
     }
   };
@@ -441,10 +491,15 @@ export default function App() {
                   <CardContent className="space-y-6 pt-6">
                     {/* Password Config */}
                     <div className="space-y-2 p-4 bg-slate-50 rounded-lg border border-slate-100">
-                      <Label className="flex items-center gap-2">
-                        <Lock className="w-4 h-4" />
-                        Đổi mật khẩu Admin (Lưu vào CSDL)
-                      </Label>
+                      <div className="flex justify-between items-center">
+                        <Label className="flex items-center gap-2">
+                          <Lock className="w-4 h-4" />
+                          Đổi mật khẩu Admin (Lưu vào CSDL)
+                        </Label>
+                        <Button variant="outline" size="sm" onClick={handleSaveOnly} disabled={isLoading}>
+                          Lưu mật khẩu
+                        </Button>
+                      </div>
                       <Input 
                         type="password"
                         placeholder="Mật khẩu mới"
@@ -456,10 +511,16 @@ export default function App() {
                     {/* Sheet Config */}
                     <div className="space-y-4">
                       <div className="space-y-2">
-                        <Label className="flex items-center gap-2">
-                          <Database className="w-4 h-4" />
-                          Link Google Sheet
-                        </Label>
+                        <div className="flex justify-between items-center">
+                          <Label className="flex items-center gap-2">
+                            <Database className="w-4 h-4" />
+                            Link Google Sheet
+                          </Label>
+                          <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-green-600">
+                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                            Firebase Connected
+                          </div>
+                        </div>
                         <div className="flex gap-2">
                           <Input 
                             placeholder="https://docs.google.com/spreadsheets/d/..." 
