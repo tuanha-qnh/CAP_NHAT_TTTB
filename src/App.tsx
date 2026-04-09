@@ -8,28 +8,6 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { motion, AnimatePresence } from "motion/react";
 
-// Firebase
-import { db, auth } from "./firebase";
-import { 
-  doc, 
-  getDoc, 
-  setDoc, 
-  onSnapshot, 
-  collection, 
-  writeBatch,
-  getDocs,
-  query,
-  where,
-  limit
-} from "firebase/firestore";
-import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  signOut,
-  User as FirebaseUser
-} from "firebase/auth";
-
 // Types
 interface SubscriberData {
   last9Digits: string;
@@ -46,8 +24,6 @@ interface AppConfig {
 
 export default function App() {
   // Auth State
-  const [user, setUser] = useState<FirebaseUser | null>(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
   const [isAdminVerified, setIsAdminVerified] = useState(false);
   const [adminPasswordInput, setAdminPasswordInput] = useState("");
 
@@ -67,39 +43,22 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Listen for Auth Changes
+  // Initial Load: Fetch Config from Cloudflare
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setIsAuthReady(true);
-      // Reset verification if user changes
-      setIsAdminVerified(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Initial Load
-  useEffect(() => {
-    const testConnection = async () => {
+    const fetchConfig = async () => {
       try {
-        await getDoc(doc(db, "settings", "main"));
-        console.log("Firebase connection successful");
-      } catch (err: any) {
-        console.error("Firebase connection error:", err);
-        setError("Lỗi kết nối Firebase: " + err.message);
+        const response = await fetch("/api/settings");
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data.sheetUrl) {
+            setConfig(data);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch config:", err);
       }
     };
-    testConnection();
-  }, []);
-
-  // Listen for Config Changes
-  useEffect(() => {
-    const unsubscribe = onSnapshot(doc(db, "settings", "main"), (snapshot) => {
-      if (snapshot.exists()) {
-        setConfig(snapshot.data() as AppConfig);
-      }
-    });
-    return () => unsubscribe();
+    fetchConfig();
   }, []);
 
   // Helper: Extract Last 9 Digits
@@ -112,17 +71,6 @@ export default function App() {
   const getSheetId = (url: string) => {
     const match = url.match(/\/d\/(.*?)(\/|$)/);
     return match ? match[1] : null;
-  };
-
-  // Admin Login (Google)
-  const handleGoogleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    try {
-      await signInWithPopup(auth, provider);
-      setError(null);
-    } catch (err: any) {
-      setError("Lỗi đăng nhập: " + err.message);
-    }
   };
 
   // Admin Password Verification
@@ -205,7 +153,12 @@ export default function App() {
     setError(null);
     setSuccess(null);
     try {
-      await setDoc(doc(db, "settings", "main"), config);
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config)
+      });
+      if (!response.ok) throw new Error("Không thể lưu cấu hình lên Cloudflare");
       setSuccess("Đã lưu cấu hình thành công.");
     } catch (err: any) {
       setError("Lỗi lưu cấu hình: " + err.message);
@@ -214,16 +167,16 @@ export default function App() {
     }
   };
 
-  // Import Data to Firestore
+  // Import Data to Cloudflare
   const handleImport = async () => {
     const sheetId = getSheetId(config.sheetUrl);
     if (!sheetId) {
-      setError("Link Google Sheet không hợp lệ hoặc chưa được thiết lập. Vui lòng kiểm tra lại link trong phần Admin.");
+      setError("Link Google Sheet không hợp lệ hoặc chưa được thiết lập.");
       return;
     }
 
     if (!config.phoneColumn || !config.statusColumn) {
-      setError("Cấu hình cột dữ liệu chưa hoàn thiện (Cột số điện thoại hoặc Cột trạng thái chưa được chọn). Vui lòng liên hệ Admin.");
+      setError("Cấu hình cột dữ liệu chưa hoàn thiện. Vui lòng liên hệ Admin.");
       return;
     }
 
@@ -232,89 +185,86 @@ export default function App() {
     setSuccess(null);
 
     try {
-      // Use a more robust export URL
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&id=${sheetId}`;
-      console.log("Fetching CSV from:", csvUrl);
-      
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&usp=sharing`;
       const response = await fetch(csvUrl);
       
-      if (!response.ok) {
-        throw new Error(`Không thể tải dữ liệu (Mã lỗi: ${response.status}). Hãy đảm bảo Sheet đã được chia sẻ công khai.`);
-      }
-
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.includes("text/html")) {
-        throw new Error("Google Sheet trả về trang HTML thay vì dữ liệu. Hãy kiểm tra lại quyền chia sẻ (Phải là 'Bất kỳ ai có liên kết đều có thể xem').");
+        setError("Lỗi: Không thể tải dữ liệu từ Google Sheet. Hãy kiểm tra lại quyền chia sẻ.");
+        setIsLoading(false);
+        return;
       }
 
       const csvText = await response.text();
       
-      if (csvText.startsWith("<!DOCTYPE html>")) {
-        throw new Error("Dữ liệu nhận được không hợp lệ (HTML). Hãy đảm bảo Sheet đã được chia sẻ công khai.");
-      }
-
-      // Wrap Papa.parse in a Promise to handle async/await properly
-      const parseCsv = (): Promise<any[]> => {
-        return new Promise((resolve, reject) => {
-          Papa.parse(csvText, {
-            header: true,
-            skipEmptyLines: true,
-            complete: (results) => resolve(results.data),
-            error: (err: any) => reject(new Error("Lỗi phân tích CSV: " + err.message))
-          });
-        });
-      };
-
-      const rows = await parseCsv();
-      
-      if (rows.length === 0) {
-        throw new Error("Không có dữ liệu trong Sheet.");
-      }
-
-      console.log(`Parsed ${rows.length} rows. Starting Firestore import...`);
-
-      let count = 0;
-      const chunks = [];
-      for (let i = 0; i < rows.length; i += 500) {
-        chunks.push(rows.slice(i, i + 500));
-      }
-
-      for (const chunk of chunks) {
-        const batch = writeBatch(db);
-        for (const row of chunk) {
-          const phone = row[config.phoneColumn];
-          const status = row[config.statusColumn];
-          
-          if (phone) {
-            const last9 = getLast9Digits(String(phone));
-            const docRef = doc(db, "subscribers", last9);
-            batch.set(docRef, {
-              last9Digits: last9,
-              fullPhoneNumber: String(phone),
-              status: String(status || "N/A"),
-              updatedAt: new Date().toISOString()
-            });
-            count++;
+      Papa.parse(csvText, {
+        header: true,
+        skipEmptyLines: true,
+        complete: async (results) => {
+          const rows = results.data as any[];
+          if (rows.length === 0) {
+            setError("Không có dữ liệu trong Sheet.");
+            setIsLoading(false);
+            return;
           }
-        }
-        await batch.commit();
-        console.log(`Committed batch. Total imported: ${count}`);
-      }
 
-      // Only try to save config if we are in admin verified mode
-      if (isAdminVerified) {
-        try {
-          await setDoc(doc(db, "settings", "main"), config);
-        } catch (e) {
-          console.warn("Config save skipped or failed (non-admin)", e);
+          try {
+            let count = 0;
+            const chunks = [];
+            for (let i = 0; i < rows.length; i += 30) {
+              chunks.push(rows.slice(i, i + 30));
+            }
+
+            for (const chunk of chunks) {
+              const subscribers = chunk.map(row => {
+                const phone = row[config.phoneColumn];
+                const status = row[config.statusColumn];
+                if (phone) {
+                  const last9 = getLast9Digits(String(phone));
+                  count++;
+                  return {
+                    last9Digits: last9,
+                    fullPhoneNumber: String(phone),
+                    status: String(status || "N/A")
+                  };
+                }
+                return null;
+              }).filter(s => s !== null);
+
+              if (subscribers.length > 0) {
+                const res = await fetch("/api/subscribers/batch", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ subscribers })
+                });
+                if (!res.ok) throw new Error("Lỗi khi gửi dữ liệu lên Cloudflare");
+              }
+            }
+
+            // Save config
+            if (isAdminVerified) {
+              await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(config)
+              });
+            }
+            
+            setSuccess(`Đã cập nhật thành công ${count} bản ghi lên Cloudflare D1.`);
+          } catch (err: any) {
+            console.error("Import error:", err);
+            setError("Lỗi cập nhật dữ liệu: " + (err.message || "Vui lòng kiểm tra lại kết nối Cloudflare."));
+          } finally {
+            setIsLoading(false);
+          }
+        },
+        error: (err: any) => {
+          setError("Lỗi xử lý dữ liệu: " + err.message);
+          setIsLoading(false);
         }
-      }
-      
-      setSuccess(`Đã cập nhật thành công ${count} bản ghi từ Google Sheet vào hệ thống.`);
+      });
     } catch (err: any) {
-      console.error("Import error:", err);
-      setError(err.message || "Đã xảy ra lỗi không xác định trong quá trình cập nhật.");
-    } finally {
+      setError("Lỗi kết nối: " + err.message);
       setIsLoading(false);
     }
   };
@@ -336,11 +286,10 @@ export default function App() {
     }
 
     try {
-      const docRef = doc(db, "subscribers", last9);
-      const docSnap = await getDoc(docRef);
-
-      if (docSnap.exists()) {
-        setSearchResult(docSnap.data() as SubscriberData);
+      const response = await fetch(`/api/subscribers/${last9}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSearchResult(data);
       } else {
         setError("Không tìm thấy thông tin cho số thuê bao này.");
       }
@@ -350,8 +299,6 @@ export default function App() {
       setIsSearching(false);
     }
   };
-
-  const isUserAdmin = user?.email === "tuanha.qnh@gmail.com";
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 selection:bg-blue-100">
@@ -400,36 +347,6 @@ export default function App() {
                   {isSearching ? "Đang tìm..." : "Tìm kiếm"}
                 </Button>
               </form>
-
-              <div className="mt-4 p-4 bg-red-50 border border-red-100 rounded-lg">
-                <ul className="text-red-600 font-bold text-sm leading-relaxed list-none space-y-2">
-                  <li className="flex gap-2">
-                    <span>•</span>
-                    <span>Lưu ý chỉ nhập các số điện thoại nằm trong danh sách giao về cho các đơn vị thực hiện. Hệ thống không hỗ trợ tra cứu các số thuê bao nằm ngoài danh sách giao về cho các đơn vị.</span>
-                  </li>
-                  <li className="flex gap-2">
-                    <span>•</span>
-                    <span>Hãy bấm nút "Cập nhật dữ liệu mới nhất" trước khi tra cứu nhé!</span>
-                  </li>
-                  <li className="flex gap-2">
-                    <span>•</span>
-                    <span>Dữ liệu tra cứu là dữ liệu offline và được update 2 lần/ngày nên có thể các thuê bao vừa thực hiện cập nhật sẽ có trạng thái là "Chưa cập nhật", bạn hãy chờ sau 1 ngày rồi kiểm tra nhé!</span>
-                  </li>
-                </ul>
-              </div>
-
-              <div className="mt-4 flex justify-end">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleImport} 
-                  disabled={isLoading || !config.sheetUrl}
-                  className="text-xs text-slate-500 hover:text-blue-600 border-slate-200"
-                >
-                  <RefreshCw className={`w-3 h-3 mr-1.5 ${isLoading ? 'animate-spin' : ''}`} />
-                  {isLoading ? "Đang cập nhật..." : "Cập nhật dữ liệu mới nhất"}
-                </Button>
-              </div>
 
               <AnimatePresence mode="wait">
                 {searchResult && (
@@ -567,9 +484,9 @@ export default function App() {
                             <Database className="w-4 h-4" />
                             Link Google Sheet
                           </Label>
-                          <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-green-600">
-                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                            Firebase Connected
+                          <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-orange-600">
+                            <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse" />
+                            Cloudflare D1 Mode
                           </div>
                         </div>
                         <div className="flex gap-2">
@@ -618,14 +535,19 @@ export default function App() {
                       )}
                     </div>
 
-                    <Button onClick={handleImport} className="w-full bg-slate-800 hover:bg-slate-900 h-12 text-lg" disabled={isLoading}>
-                      {isLoading ? (
-                        <RefreshCw className="w-5 h-5 animate-spin mr-2" />
-                      ) : (
-                        <Database className="w-5 h-5 mr-2" />
-                      )}
-                      Lưu cấu hình & Import dữ liệu vào CSDL
-                    </Button>
+                    <div className="flex gap-4">
+                      <Button onClick={handleImport} className="flex-1 bg-slate-800 hover:bg-slate-900 h-12 text-lg" disabled={isLoading}>
+                        {isLoading ? (
+                          <RefreshCw className="w-5 h-5 animate-spin mr-2" />
+                        ) : (
+                          <Database className="w-5 h-5 mr-2" />
+                        )}
+                        Import dữ liệu từ Sheet
+                      </Button>
+                      <Button onClick={handleSaveOnly} variant="outline" className="h-12 px-6 border-slate-200" disabled={isLoading}>
+                        Lưu cấu hình
+                      </Button>
+                    </div>
                   </CardContent>
                   <CardFooter className="text-xs text-slate-400 border-t border-slate-100 pt-4">
                     Hệ thống quản trị dữ liệu
@@ -639,7 +561,7 @@ export default function App() {
 
       <footer className="mt-12 py-8 text-center text-slate-400 text-sm border-t border-slate-200">
         <p>© 2026 Vinaphone Subscriber Lookup System</p>
-        <p className="mt-1">Hệ thống sử dụng Firebase Cloud Database</p>
+        <p className="mt-1">Hệ thống sử dụng Cloudflare D1 Database</p>
       </footer>
     </div>
   );
