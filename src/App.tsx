@@ -218,12 +218,12 @@ export default function App() {
   const handleImport = async () => {
     const sheetId = getSheetId(config.sheetUrl);
     if (!sheetId) {
-      setError("Link Google Sheet không hợp lệ hoặc chưa được thiết lập.");
+      setError("Link Google Sheet không hợp lệ hoặc chưa được thiết lập. Vui lòng kiểm tra lại link trong phần Admin.");
       return;
     }
 
     if (!config.phoneColumn || !config.statusColumn) {
-      setError("Cấu hình cột dữ liệu chưa hoàn thiện. Vui lòng liên hệ Admin.");
+      setError("Cấu hình cột dữ liệu chưa hoàn thiện (Cột số điện thoại hoặc Cột trạng thái chưa được chọn). Vui lòng liên hệ Admin.");
       return;
     }
 
@@ -232,74 +232,89 @@ export default function App() {
     setSuccess(null);
 
     try {
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&usp=sharing`;
+      // Use a more robust export URL
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&id=${sheetId}`;
+      console.log("Fetching CSV from:", csvUrl);
+      
       const response = await fetch(csvUrl);
       
+      if (!response.ok) {
+        throw new Error(`Không thể tải dữ liệu (Mã lỗi: ${response.status}). Hãy đảm bảo Sheet đã được chia sẻ công khai.`);
+      }
+
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.includes("text/html")) {
-        setError("Lỗi: Không thể tải dữ liệu từ Google Sheet. Hãy kiểm tra lại quyền chia sẻ.");
-        setIsLoading(false);
-        return;
+        throw new Error("Google Sheet trả về trang HTML thay vì dữ liệu. Hãy kiểm tra lại quyền chia sẻ (Phải là 'Bất kỳ ai có liên kết đều có thể xem').");
       }
 
       const csvText = await response.text();
       
-      Papa.parse(csvText, {
-        header: true,
-        skipEmptyLines: true,
-        complete: async (results) => {
-          const rows = results.data as any[];
-          if (rows.length === 0) {
-            setError("Không có dữ liệu trong Sheet.");
-            setIsLoading(false);
-            return;
-          }
+      if (csvText.startsWith("<!DOCTYPE html>")) {
+        throw new Error("Dữ liệu nhận được không hợp lệ (HTML). Hãy đảm bảo Sheet đã được chia sẻ công khai.");
+      }
 
-          let count = 0;
-          const chunks = [];
-          for (let i = 0; i < rows.length; i += 500) {
-            chunks.push(rows.slice(i, i + 500));
-          }
+      // Wrap Papa.parse in a Promise to handle async/await properly
+      const parseCsv = (): Promise<any[]> => {
+        return new Promise((resolve, reject) => {
+          Papa.parse(csvText, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (results) => resolve(results.data),
+            error: (err: any) => reject(new Error("Lỗi phân tích CSV: " + err.message))
+          });
+        });
+      };
 
-          for (const chunk of chunks) {
-            const batch = writeBatch(db);
-            for (const row of chunk) {
-              const phone = row[config.phoneColumn];
-              const status = row[config.statusColumn];
-              
-              if (phone) {
-                const last9 = getLast9Digits(String(phone));
-                const docRef = doc(db, "subscribers", last9);
-                batch.set(docRef, {
-                  last9Digits: last9,
-                  fullPhoneNumber: String(phone),
-                  status: String(status || "N/A")
-                });
-                count++;
-              }
-            }
-            await batch.commit();
-          }
+      const rows = await parseCsv();
+      
+      if (rows.length === 0) {
+        throw new Error("Không có dữ liệu trong Sheet.");
+      }
 
-          // Only try to save config if we are in admin verified mode
-          if (isAdminVerified) {
-            try {
-              await setDoc(doc(db, "settings", "main"), config);
-            } catch (e) {
-              console.log("Config save skipped or failed (non-admin)");
-            }
-          }
+      console.log(`Parsed ${rows.length} rows. Starting Firestore import...`);
+
+      let count = 0;
+      const chunks = [];
+      for (let i = 0; i < rows.length; i += 500) {
+        chunks.push(rows.slice(i, i + 500));
+      }
+
+      for (const chunk of chunks) {
+        const batch = writeBatch(db);
+        for (const row of chunk) {
+          const phone = row[config.phoneColumn];
+          const status = row[config.statusColumn];
           
-          setSuccess(`Đã cập nhật thành công ${count} bản ghi từ Google Sheet.`);
-          setIsLoading(false);
-        },
-        error: (err: any) => {
-          setError("Lỗi xử lý dữ liệu: " + err.message);
-          setIsLoading(false);
+          if (phone) {
+            const last9 = getLast9Digits(String(phone));
+            const docRef = doc(db, "subscribers", last9);
+            batch.set(docRef, {
+              last9Digits: last9,
+              fullPhoneNumber: String(phone),
+              status: String(status || "N/A"),
+              updatedAt: new Date().toISOString()
+            });
+            count++;
+          }
         }
-      });
+        await batch.commit();
+        console.log(`Committed batch. Total imported: ${count}`);
+      }
+
+      // Only try to save config if we are in admin verified mode
+      if (isAdminVerified) {
+        try {
+          await setDoc(doc(db, "settings", "main"), config);
+        } catch (e) {
+          console.warn("Config save skipped or failed (non-admin)", e);
+        }
+      }
+      
+      setSuccess(`Đã cập nhật thành công ${count} bản ghi từ Google Sheet vào hệ thống.`);
     } catch (err: any) {
-      setError("Lỗi kết nối: " + err.message);
+      console.error("Import error:", err);
+      setError(err.message || "Đã xảy ra lỗi không xác định trong quá trình cập nhật.");
+    } finally {
       setIsLoading(false);
     }
   };
