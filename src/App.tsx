@@ -127,34 +127,60 @@ export default function App() {
   const readHeaders = async () => {
     const sheetId = getSheetId(config.sheetUrl);
     if (!sheetId) {
-      setError("Link Google Sheet không hợp lệ.");
+      setError("Link Google Sheet không hợp lệ. Vui lòng sử dụng link có dạng /d/ID_SHEET/");
       return;
     }
 
     setIsLoading(true);
     setError(null);
+    setHeaders([]);
 
     try {
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&usp=sharing`;
       const response = await fetch(csvUrl);
+      
+      // Check if response is HTML (usually means it's a login page because sheet is private)
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("text/html")) {
+        setError("Lỗi: Không thể đọc dữ liệu. Vui lòng kiểm tra lại quyền chia sẻ của Google Sheet (Phải đặt là 'Bất kỳ ai có liên kết đều có thể xem').");
+        setIsLoading(false);
+        return;
+      }
+
       const csvText = await response.text();
       
+      if (csvText.startsWith("<!DOCTYPE html>")) {
+        setError("Lỗi: Google Sheet đang trả về trang web thay vì dữ liệu. Hãy đảm bảo bạn đã chia sẻ Sheet công khai.");
+        setIsLoading(false);
+        return;
+      }
+
       Papa.parse(csvText, {
         header: false,
         preview: 1,
+        skipEmptyLines: true,
         complete: (results) => {
           if (results.data && results.data.length > 0) {
-            setHeaders(results.data[0] as string[]);
+            const rawHeaders = results.data[0] as string[];
+            // Filter out empty or invalid headers
+            const cleanHeaders = rawHeaders.filter(h => h && h.trim() !== "");
+            if (cleanHeaders.length === 0) {
+              setError("Không tìm thấy tiêu đề cột hợp lệ trong Sheet.");
+            } else {
+              setHeaders(cleanHeaders);
+            }
+          } else {
+            setError("Sheet không có dữ liệu.");
           }
           setIsLoading(false);
         },
         error: (err: any) => {
-          setError("Lỗi đọc tiêu đề: " + err.message);
+          setError("Lỗi phân tích CSV: " + err.message);
           setIsLoading(false);
         }
       });
     } catch (err) {
-      setError("Không thể kết nối với Google Sheet.");
+      setError("Không thể kết nối với Google Sheet. Vui lòng kiểm tra kết nối mạng.");
       setIsLoading(false);
     }
   };
