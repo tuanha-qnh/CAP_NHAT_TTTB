@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
@@ -8,10 +7,6 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-const CF_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
-const CF_DATABASE_ID = process.env.CLOUDFLARE_DATABASE_ID;
-const CF_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 
 async function queryD1(sql: string, params: any[] = []) {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -50,7 +45,15 @@ app.use(express.json({ limit: '50mb' }));
 
 // API: Health Check
 app.get("/api/ping", (req, res) => {
-  res.json({ status: "ok", message: "API is working on Vercel!" });
+  res.json({ 
+    status: "ok", 
+    message: "API is working on Vercel!",
+    env_check: {
+      has_account: !!process.env.CLOUDFLARE_ACCOUNT_ID,
+      has_database: !!process.env.CLOUDFLARE_DATABASE_ID,
+      has_token: !!process.env.CLOUDFLARE_API_TOKEN
+    }
+  });
 });
 
 // API: Get Settings
@@ -63,6 +66,7 @@ app.get("/api/settings", async (req, res) => {
       res.json({});
     }
   } catch (error: any) {
+    console.error("Settings Get Error:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -77,6 +81,7 @@ app.post("/api/settings", async (req, res) => {
     );
     res.json({ success: true });
   } catch (error: any) {
+    console.error("Settings Save Error:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -91,9 +96,10 @@ app.get("/api/subscribers/:last9", async (req, res) => {
     if (result && result.results && result.results.length > 0) {
       res.json(result.results[0]);
     } else {
-      res.status(404).json({ error: "Not found" });
+      res.status(404).json({ error: "Không tìm thấy thông tin cho số thuê bao này." });
     }
   } catch (error: any) {
+    console.error("Search Error:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -102,7 +108,7 @@ app.get("/api/subscribers/:last9", async (req, res) => {
 app.post("/api/subscribers/batch", async (req, res) => {
   const { subscribers } = req.body;
   if (!Array.isArray(subscribers) || subscribers.length === 0) {
-    return res.status(400).json({ error: "Invalid data" });
+    return res.status(400).json({ error: "Dữ liệu không hợp lệ" });
   }
 
   try {
@@ -117,23 +123,36 @@ app.post("/api/subscribers/batch", async (req, res) => {
     await queryD1(sql, params);
     res.json({ success: true, count: subscribers.length });
   } catch (error: any) {
+    console.error("Batch Import Error:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
+// Global Error Handler
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error("Global Error:", err);
+  res.status(500).json({ error: "Internal Server Error: " + err.message });
+});
+
 export default app;
 
+// Dev Server logic (only runs locally)
 if (process.env.NODE_ENV !== "production" && fileURLToPath(import.meta.url) === process.argv[1]) {
   const PORT = 3000;
-  async function startDev() {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Dev server running on http://localhost:${PORT}`);
-    });
-  }
+  const startDev = async () => {
+    try {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+      app.listen(PORT, "0.0.0.0", () => {
+        console.log(`Dev server running on http://localhost:${PORT}`);
+      });
+    } catch (e) {
+      console.error("Failed to start dev server:", e);
+    }
+  };
   startDev();
 }
