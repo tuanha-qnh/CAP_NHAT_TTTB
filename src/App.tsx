@@ -514,7 +514,7 @@ export default function App() {
                               onChange={(e) => setConfig({...config, phoneColumn: e.target.value})}
                             >
                               <option value="">-- Chọn cột --</option>
-                              {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                              {headers.map((h, idx) => <option key={`phone-${h}-${idx}`} value={h}>{h}</option>)}
                             </select>
                           </div>
                           <div className="space-y-2">
@@ -528,7 +528,7 @@ export default function App() {
                               onChange={(e) => setConfig({...config, statusColumn: e.target.value})}
                             >
                               <option value="">-- Chọn cột --</option>
-                              {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                              {headers.map((h, idx) => <option key={`status-${h}-${idx}`} value={h}>{h}</option>)}
                             </select>
                           </div>
                         </motion.div>
