@@ -15,7 +15,7 @@ const CF_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 
 async function queryD1(sql: string, params: any[] = []) {
   if (!CF_ACCOUNT_ID || !CF_DATABASE_ID || !CF_API_TOKEN) {
-    throw new Error("Cloudflare credentials not configured in .env");
+    throw new Error("Lỗi: Chưa cấu hình tham số Cloudflare (Account ID, Database ID, API Token) trong môi trường máy chủ. Vui lòng kiểm tra lại Settings/Environment Variables.");
   }
 
   const response = await fetch(
