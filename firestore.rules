@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+             (request.auth.token.email == "tuanha.qnh@gmail.com" && request.auth.token.email_verified == true);
+    }
+
+    // Settings
+    match /settings/main {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Subscribers
+    match /subscribers/{subscriberId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}
