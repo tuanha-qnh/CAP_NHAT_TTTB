@@ -459,7 +459,7 @@ export default function App() {
                         type="password" 
                         value={adminPasswordInput}
                         onChange={(e) => setAdminPasswordInput(e.target.value)}
-                        placeholder="Nhập mật khẩu (mặc định: admin)"
+                        placeholder="Nhập mật khẩu"
                         autoFocus
                       />
                     </div>
@@ -577,7 +577,7 @@ export default function App() {
                     </Button>
                   </CardContent>
                   <CardFooter className="text-xs text-slate-400 border-t border-slate-100 pt-4">
-                    Admin: {user.email}
+                    Hệ thống quản trị dữ liệu
                   </CardFooter>
                 </Card>
               </motion.div>
