@@ -160,8 +160,18 @@ export default function App() {
       });
       
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Không thể lưu cấu hình lên Cloudflare");
+        const text = await response.text();
+        let errorMessage = `Lỗi Server (${response.status})`;
+        try {
+          const json = JSON.parse(text);
+          errorMessage = json.error || errorMessage;
+        } catch (e) {
+          // Nếu không phải JSON, có thể là lỗi HTML từ Vercel
+          if (text.includes("404")) errorMessage = "Lỗi 404: Không tìm thấy đường dẫn API. Kiểm tra vercel.json";
+          else if (text.includes("500")) errorMessage = "Lỗi 500: Server gặp sự cố. Kiểm tra Logs trên Vercel";
+          else errorMessage = text.substring(0, 100); // Lấy 100 ký tự đầu của lỗi
+        }
+        throw new Error(errorMessage);
       }
       
       setSuccess("Đã lưu cấu hình thành công.");

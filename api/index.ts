@@ -48,6 +48,11 @@ async function queryD1(sql: string, params: any[] = []) {
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
+// API: Health Check
+app.get("/api/ping", (req, res) => {
+  res.json({ status: "ok", message: "API is working on Vercel!" });
+});
+
 // API: Get Settings
 app.get("/api/settings", async (req, res) => {
   try {
