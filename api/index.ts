@@ -14,16 +14,20 @@ const CF_DATABASE_ID = process.env.CLOUDFLARE_DATABASE_ID;
 const CF_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 
 async function queryD1(sql: string, params: any[] = []) {
-  if (!CF_ACCOUNT_ID || !CF_DATABASE_ID || !CF_API_TOKEN) {
-    throw new Error("Lỗi: Chưa cấu hình tham số Cloudflare (Account ID, Database ID, API Token) trong môi trường máy chủ. Vui lòng kiểm tra lại Settings/Environment Variables.");
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const databaseId = process.env.CLOUDFLARE_DATABASE_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+
+  if (!accountId || !databaseId || !apiToken) {
+    throw new Error("Lỗi: Chưa cấu hình Environment Variables (Account ID, Database ID, API Token) trên Vercel.");
   }
 
   const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/d1/database/${CF_DATABASE_ID}/query`,
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`,
     {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${CF_API_TOKEN}`,
+        "Authorization": `Bearer ${apiToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ sql, params }),
@@ -32,7 +36,11 @@ async function queryD1(sql: string, params: any[] = []) {
 
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.errors?.[0]?.message || data.error || "D1 Query Error");
+    const msg = data.errors?.[0]?.message || data.error || "D1 Query Error";
+    if (msg.includes("no such table")) {
+      throw new Error("Lỗi: Bảng dữ liệu chưa tồn tại trong Cloudflare D1. Vui lòng chạy lệnh SQL tạo bảng.");
+    }
+    throw new Error(msg);
   }
   return data.result?.[0] || data;
 }

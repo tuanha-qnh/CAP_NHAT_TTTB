@@ -158,7 +158,12 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config)
       });
-      if (!response.ok) throw new Error("Không thể lưu cấu hình lên Cloudflare");
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Không thể lưu cấu hình lên Cloudflare");
+      }
+      
       setSuccess("Đã lưu cấu hình thành công.");
     } catch (err: any) {
       setError("Lỗi lưu cấu hình: " + err.message);
@@ -291,7 +296,8 @@ export default function App() {
         const data = await response.json();
         setSearchResult(data);
       } else {
-        setError("Không tìm thấy thông tin cho số thuê bao này.");
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData.error || "Không tìm thấy thông tin cho số thuê bao này.");
       }
     } catch (err: any) {
       setError("Lỗi tra cứu: " + err.message);
