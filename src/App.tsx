@@ -216,14 +216,14 @@ export default function App() {
 
   // Import Data to Firestore
   const handleImport = async () => {
-    if (!config.phoneColumn || !config.statusColumn) {
-      setError("Vui lòng chọn trường dữ liệu để import.");
+    const sheetId = getSheetId(config.sheetUrl);
+    if (!sheetId) {
+      setError("Link Google Sheet không hợp lệ hoặc chưa được thiết lập.");
       return;
     }
 
-    const sheetId = getSheetId(config.sheetUrl);
-    if (!sheetId) {
-      setError("Link Google Sheet không hợp lệ.");
+    if (!config.phoneColumn || !config.statusColumn) {
+      setError("Cấu hình cột dữ liệu chưa hoàn thiện. Vui lòng liên hệ Admin.");
       return;
     }
 
@@ -237,7 +237,7 @@ export default function App() {
       
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.includes("text/html")) {
-        setError("Lỗi: Google Sheet trả về trang HTML. Hãy kiểm tra lại quyền chia sẻ (Phải là 'Bất kỳ ai có liên kết đều có thể xem').");
+        setError("Lỗi: Không thể tải dữ liệu từ Google Sheet. Hãy kiểm tra lại quyền chia sẻ.");
         setIsLoading(false);
         return;
       }
@@ -281,10 +281,16 @@ export default function App() {
             await batch.commit();
           }
 
-          // Save Config
-          await setDoc(doc(db, "settings", "main"), config);
+          // Only try to save config if we are in admin verified mode
+          if (isAdminVerified) {
+            try {
+              await setDoc(doc(db, "settings", "main"), config);
+            } catch (e) {
+              console.log("Config save skipped or failed (non-admin)");
+            }
+          }
           
-          setSuccess(`Đã import thành công ${count} bản ghi vào CSDL Firebase.`);
+          setSuccess(`Đã cập nhật thành công ${count} bản ghi từ Google Sheet.`);
           setIsLoading(false);
         },
         error: (err: any) => {
@@ -379,6 +385,19 @@ export default function App() {
                   {isSearching ? "Đang tìm..." : "Tìm kiếm"}
                 </Button>
               </form>
+
+              <div className="mt-4 flex justify-end">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleImport} 
+                  disabled={isLoading || !config.sheetUrl}
+                  className="text-xs text-slate-500 hover:text-blue-600 border-slate-200"
+                >
+                  <RefreshCw className={`w-3 h-3 mr-1.5 ${isLoading ? 'animate-spin' : ''}`} />
+                  {isLoading ? "Đang cập nhật..." : "Cập nhật dữ liệu mới nhất"}
+                </Button>
+              </div>
 
               <AnimatePresence mode="wait">
                 {searchResult && (

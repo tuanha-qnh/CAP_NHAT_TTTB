@@ -20,7 +20,7 @@ service cloud.firestore {
     // Subscribers
     match /subscribers/{subscriberId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if true;
     }
   }
 }
