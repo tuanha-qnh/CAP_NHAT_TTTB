@@ -364,6 +364,13 @@ export default function App() {
                 </Button>
               </form>
 
+              <p className="mt-3 text-red-600 text-sm font-medium flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  <strong>Lưu ý:</strong> Chỉ nhập các số điện thoại nằm trong danh sách phân giao về cho đơn vị thực hiện. <strong>KHÔNG NHẬP</strong> các số nằm ngoài danh sách.
+                </span>
+              </p>
+
               <AnimatePresence mode="wait">
                 {searchResult && (
                   <motion.div 
