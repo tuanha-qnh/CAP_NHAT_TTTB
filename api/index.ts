@@ -111,12 +111,21 @@ app.post("/api/subscribers/batch", async (req, res) => {
     return res.status(400).json({ error: "Dữ liệu không hợp lệ" });
   }
 
+  // Debug log for the first item
+  console.log("Importing batch, first item sample:", JSON.stringify(subscribers[0]));
+
   try {
-    let sql = "INSERT OR REPLACE INTO subscribers (last9Digits, fullPhoneNumber, status) VALUES ";
+    let sql = "INSERT OR REPLACE INTO subscribers (last9Digits, fullPhoneNumber, status, updatedBy) VALUES ";
     const params: any[] = [];
     const placeholders = subscribers.map(s => {
-      params.push(s.last9Digits, s.fullPhoneNumber, s.status);
-      return "(?, ?, ?)";
+      // Ensure values are strings and not null/undefined
+      const last9 = String(s.last9Digits || "");
+      const phone = String(s.fullPhoneNumber || "");
+      const status = String(s.status || "N/A");
+      const updatedBy = String(s.updatedBy || "N/A");
+      
+      params.push(last9, phone, status, updatedBy);
+      return "(?, ?, ?, ?)";
     });
     sql += placeholders.join(", ");
     

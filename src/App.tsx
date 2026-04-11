@@ -13,12 +13,14 @@ interface SubscriberData {
   last9Digits: string;
   fullPhoneNumber: string;
   status: string;
+  updatedBy: string;
 }
 
 interface AppConfig {
   sheetUrl: string;
   phoneColumn: string;
   statusColumn: string;
+  updatedByUserColumn: string;
   adminPassword?: string;
 }
 
@@ -31,7 +33,8 @@ export default function App() {
   const [config, setConfig] = useState<AppConfig>({
     sheetUrl: "",
     phoneColumn: "",
-    statusColumn: ""
+    statusColumn: "",
+    updatedByUserColumn: ""
   });
   const [headers, setHeaders] = useState<string[]>([]);
   
@@ -190,7 +193,7 @@ export default function App() {
       return;
     }
 
-    if (!config.phoneColumn || !config.statusColumn) {
+    if (!config.phoneColumn || !config.statusColumn || !config.updatedByUserColumn) {
       setError("Cấu hình cột dữ liệu chưa hoàn thiện. Vui lòng liên hệ Admin.");
       return;
     }
@@ -223,6 +226,22 @@ export default function App() {
             return;
           }
 
+          // Helper to get value from row with flexible key matching
+          const getRowValue = (row: any, colName: string) => {
+            if (!colName) return "N/A";
+            const val = row[colName];
+            if (val !== undefined && val !== null && String(val).trim() !== "") return String(val).trim();
+            
+            // Fallback: try case-insensitive or trimmed match
+            const target = colName.trim().toLowerCase();
+            const actualKey = Object.keys(row).find(k => k.trim().toLowerCase() === target);
+            if (actualKey) {
+              const val2 = row[actualKey];
+              if (val2 !== undefined && val2 !== null && String(val2).trim() !== "") return String(val2).trim();
+            }
+            return "N/A";
+          };
+
           try {
             let count = 0;
             const chunks = [];
@@ -232,27 +251,34 @@ export default function App() {
 
             for (const chunk of chunks) {
               const subscribers = chunk.map(row => {
-                const phone = row[config.phoneColumn];
-                const status = row[config.statusColumn];
-                if (phone) {
-                  const last9 = getLast9Digits(String(phone));
+                const phone = getRowValue(row, config.phoneColumn);
+                const status = getRowValue(row, config.statusColumn);
+                const updatedBy = getRowValue(row, config.updatedByUserColumn);
+                
+                if (phone && phone !== "N/A") {
+                  const last9 = getLast9Digits(phone);
                   count++;
                   return {
                     last9Digits: last9,
-                    fullPhoneNumber: String(phone),
-                    status: String(status || "N/A")
+                    fullPhoneNumber: phone,
+                    status: status,
+                    updatedBy: updatedBy
                   };
                 }
                 return null;
               }).filter(s => s !== null);
 
               if (subscribers.length > 0) {
+                console.log("Sending batch to Cloudflare:", subscribers[0]);
                 const res = await fetch("/api/subscribers/batch", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ subscribers })
                 });
-                if (!res.ok) throw new Error("Lỗi khi gửi dữ liệu lên Cloudflare");
+                if (!res.ok) {
+                  const errData = await res.json().catch(() => ({}));
+                  throw new Error(errData.error || "Lỗi khi gửi dữ liệu lên Cloudflare");
+                }
               }
             }
 
@@ -374,6 +400,7 @@ export default function App() {
               <AnimatePresence mode="wait">
                 {searchResult && (
                   <motion.div 
+                    key="search-result"
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95 }}
@@ -388,8 +415,8 @@ export default function App() {
                           <span className="font-mono font-bold">{searchResult.fullPhoneNumber}</span>
                         </div>
                         <div className="flex justify-between border-b border-green-100 pb-2">
-                          <span className="opacity-70">Mã so khớp (9 số cuối):</span>
-                          <span className="font-mono">{searchResult.last9Digits}</span>
+                          <span className="opacity-70">User cập nhật:</span>
+                          <span className="font-medium">{searchResult.updatedBy}</span>
                         </div>
                         <div className="flex justify-between pt-1">
                           <span className="opacity-70">Trạng thái:</span>
@@ -402,6 +429,7 @@ export default function App() {
 
                 {error && (
                   <motion.div 
+                    key="error-alert"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     className="mt-4"
@@ -416,6 +444,7 @@ export default function App() {
 
                 {success && (
                   <motion.div 
+                    key="success-alert"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     className="mt-4"
@@ -525,7 +554,7 @@ export default function App() {
                       </div>
 
                       {headers.length > 0 && (
-                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-blue-50/30 rounded-lg border border-blue-100">
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-blue-50/30 rounded-lg border border-blue-100">
                           <div className="space-y-2">
                             <Label className="flex items-center gap-2">
                               <Phone className="w-4 h-4" />
@@ -552,6 +581,20 @@ export default function App() {
                             >
                               <option value="">-- Chọn cột --</option>
                               {headers.map((h, idx) => <option key={`status-${h}-${idx}`} value={h}>{h}</option>)}
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="flex items-center gap-2">
+                              <User className="w-4 h-4" />
+                              Cột User cập nhật
+                            </Label>
+                            <select 
+                              className="w-full h-10 px-3 py-2 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              value={config.updatedByUserColumn}
+                              onChange={(e) => setConfig({...config, updatedByUserColumn: e.target.value})}
+                            >
+                              <option value="">-- Chọn cột --</option>
+                              {headers.map((h, idx) => <option key={`updatedBy-${h}-${idx}`} value={h}>{h}</option>)}
                             </select>
                           </div>
                         </motion.div>
