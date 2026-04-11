@@ -133,6 +133,8 @@ app.post("/api/subscribers/batch", async (req, res) => {
     res.json({ success: true, count: subscribers.length });
   } catch (error: any) {
     console.error("Batch Import Error:", error);
+    console.error("SQL Sample:", sql.substring(0, 200));
+    console.error("Params Count:", params.length);
     res.status(500).json({ error: error.message });
   }
 });

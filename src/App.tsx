@@ -245,8 +245,8 @@ export default function App() {
           try {
             let count = 0;
             const chunks = [];
-            for (let i = 0; i < rows.length; i += 30) {
-              chunks.push(rows.slice(i, i + 30));
+            for (let i = 0; i < rows.length; i += 15) {
+              chunks.push(rows.slice(i, i + 15));
             }
 
             for (const chunk of chunks) {
@@ -277,7 +277,8 @@ export default function App() {
                 });
                 if (!res.ok) {
                   const errData = await res.json().catch(() => ({}));
-                  throw new Error(errData.error || "Lỗi khi gửi dữ liệu lên Cloudflare");
+                  console.error("Server Error Details:", errData);
+                  throw new Error(errData.error || `Lỗi Server (${res.status}): Không thể gửi dữ liệu lên Cloudflare`);
                 }
               }
             }
