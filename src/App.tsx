@@ -16,13 +16,29 @@ interface SubscriberData {
   updatedBy: string;
 }
 
-interface AppConfig {
+interface SourceConfig {
   sheetUrl: string;
   phoneColumn: string;
   statusColumn: string;
   updatedByUserColumn: string;
+}
+
+interface AppConfig {
+  sources: {
+    main: SourceConfig;
+    invalidDocs: SourceConfig;
+    id9Digits: SourceConfig;
+    others: SourceConfig;
+  };
   adminPassword?: string;
 }
+
+const DEFAULT_SOURCE_CONFIG: SourceConfig = {
+  sheetUrl: "",
+  phoneColumn: "",
+  statusColumn: "",
+  updatedByUserColumn: ""
+};
 
 export default function App() {
   // Auth State
@@ -31,17 +47,27 @@ export default function App() {
 
   // Config State
   const [config, setConfig] = useState<AppConfig>({
-    sheetUrl: "",
-    phoneColumn: "",
-    statusColumn: "",
-    updatedByUserColumn: ""
+    sources: {
+      main: { ...DEFAULT_SOURCE_CONFIG },
+      invalidDocs: { ...DEFAULT_SOURCE_CONFIG },
+      id9Digits: { ...DEFAULT_SOURCE_CONFIG },
+      others: { ...DEFAULT_SOURCE_CONFIG }
+    },
+    adminPassword: ""
   });
-  const [headers, setHeaders] = useState<string[]>([]);
+  
+  const [headersMap, setHeadersMap] = useState<Record<string, string[]>>({
+    main: [],
+    invalidDocs: [],
+    id9Digits: [],
+    others: []
+  });
   
   // App State
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResult, setSearchResult] = useState<SubscriberData | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -53,8 +79,24 @@ export default function App() {
         const response = await fetch("/api/settings");
         if (response.ok) {
           const data = await response.json();
-          if (data && data.sheetUrl) {
+          if (data && data.sources) {
             setConfig(data);
+          } else if (data && data.sheetUrl) {
+            // Migration logic for old config format
+            setConfig({
+              sources: {
+                main: {
+                  sheetUrl: data.sheetUrl || "",
+                  phoneColumn: data.phoneColumn || "",
+                  statusColumn: data.statusColumn || "",
+                  updatedByUserColumn: data.updatedByUserColumn || ""
+                },
+                invalidDocs: { ...DEFAULT_SOURCE_CONFIG },
+                id9Digits: { ...DEFAULT_SOURCE_CONFIG },
+                others: { ...DEFAULT_SOURCE_CONFIG }
+              },
+              adminPassword: data.adminPassword || ""
+            });
           }
         }
       } catch (err) {
@@ -89,37 +131,30 @@ export default function App() {
   };
 
   // Read Headers from Sheet
-  const readHeaders = async () => {
-    const sheetId = getSheetId(config.sheetUrl);
+  const readHeaders = async (sourceKey: keyof AppConfig['sources']) => {
+    const source = config.sources[sourceKey];
+    const sheetId = getSheetId(source.sheetUrl);
     if (!sheetId) {
-      setError("Link Google Sheet không hợp lệ. Vui lòng sử dụng link có dạng /d/ID_SHEET/");
+      setError(`Link Google Sheet của module ${sourceKey} không hợp lệ.`);
       return;
     }
 
-    setIsLoading(true);
+    setLoadingMap(prev => ({ ...prev, [sourceKey]: true }));
     setError(null);
-    setHeaders([]);
+    setHeadersMap(prev => ({ ...prev, [sourceKey]: [] }));
 
     try {
       const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&usp=sharing`;
       const response = await fetch(csvUrl);
       
-      // Check if response is HTML (usually means it's a login page because sheet is private)
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.includes("text/html")) {
-        setError("Lỗi: Không thể đọc dữ liệu. Vui lòng kiểm tra lại quyền chia sẻ của Google Sheet (Phải đặt là 'Bất kỳ ai có liên kết đều có thể xem').");
-        setIsLoading(false);
+        setError(`Lỗi: Không thể đọc dữ liệu ${sourceKey}. Vui lòng kiểm tra quyền chia sẻ của Google Sheet.`);
+        setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
         return;
       }
 
       const csvText = await response.text();
-      
-      if (csvText.startsWith("<!DOCTYPE html>")) {
-        setError("Lỗi: Google Sheet đang trả về trang web thay vì dữ liệu. Hãy đảm bảo bạn đã chia sẻ Sheet công khai.");
-        setIsLoading(false);
-        return;
-      }
-
       Papa.parse(csvText, {
         header: false,
         preview: 1,
@@ -127,26 +162,25 @@ export default function App() {
         complete: (results) => {
           if (results.data && results.data.length > 0) {
             const rawHeaders = results.data[0] as string[];
-            // Filter out empty or invalid headers
             const cleanHeaders = rawHeaders.filter(h => h && h.trim() !== "");
             if (cleanHeaders.length === 0) {
-              setError("Không tìm thấy tiêu đề cột hợp lệ trong Sheet.");
+              setError(`Không tìm thấy tiêu đề cột hợp lệ trong Sheet của ${sourceKey}.`);
             } else {
-              setHeaders(cleanHeaders);
+              setHeadersMap(prev => ({ ...prev, [sourceKey]: cleanHeaders }));
             }
           } else {
-            setError("Sheet không có dữ liệu.");
+            setError(`Sheet của ${sourceKey} không có dữ liệu.`);
           }
-          setIsLoading(false);
+          setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
         },
         error: (err: any) => {
-          setError("Lỗi phân tích CSV: " + err.message);
-          setIsLoading(false);
+          setError(`Lỗi phân tích CSV (${sourceKey}): ` + err.message);
+          setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
         }
       });
     } catch (err) {
-      setError("Không thể kết nối với Google Sheet. Vui lòng kiểm tra kết nối mạng.");
-      setIsLoading(false);
+      setError(`Không thể kết nối với Google Sheet của ${sourceKey}.`);
+      setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
     }
   };
 
@@ -163,18 +197,7 @@ export default function App() {
       });
       
       if (!response.ok) {
-        const text = await response.text();
-        let errorMessage = `Lỗi Server (${response.status})`;
-        try {
-          const json = JSON.parse(text);
-          errorMessage = json.error || errorMessage;
-        } catch (e) {
-          // Nếu không phải JSON, có thể là lỗi HTML từ Vercel
-          if (text.includes("404")) errorMessage = "Lỗi 404: Không tìm thấy đường dẫn API. Kiểm tra vercel.json";
-          else if (text.includes("500")) errorMessage = "Lỗi 500: Server gặp sự cố. Kiểm tra Logs trên Vercel";
-          else errorMessage = text.substring(0, 100); // Lấy 100 ký tự đầu của lỗi
-        }
-        throw new Error(errorMessage);
+        throw new Error("Lỗi khi lưu cấu hình lên Server.");
       }
       
       setSuccess("Đã lưu cấu hình thành công.");
@@ -186,127 +209,121 @@ export default function App() {
   };
 
   // Import Data to Cloudflare
-  const handleImport = async () => {
-    const sheetId = getSheetId(config.sheetUrl);
-    if (!sheetId) {
-      setError("Link Google Sheet không hợp lệ hoặc chưa được thiết lập.");
-      return;
+  const handleImport = async (sourceKey: keyof AppConfig['sources']): Promise<number> => {
+    const source = config.sources[sourceKey];
+    const sheetId = getSheetId(source.sheetUrl);
+    
+    if (!sheetId || !source.phoneColumn || !source.statusColumn || !source.updatedByUserColumn) {
+      console.log(`Bỏ qua module ${sourceKey} do chưa cấu hình đầy đủ.`);
+      return 0;
     }
 
-    if (!config.phoneColumn || !config.statusColumn || !config.updatedByUserColumn) {
-      setError("Cấu hình cột dữ liệu chưa hoàn thiện. Vui lòng liên hệ Admin.");
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-    setSuccess(null);
+    setLoadingMap(prev => ({ ...prev, [sourceKey]: true }));
 
     try {
       const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&usp=sharing`;
       const response = await fetch(csvUrl);
-      
-      const contentType = response.headers.get("content-type");
-      if (contentType && contentType.includes("text/html")) {
-        setError("Lỗi: Không thể tải dữ liệu từ Google Sheet. Hãy kiểm tra lại quyền chia sẻ.");
-        setIsLoading(false);
-        return;
-      }
-
       const csvText = await response.text();
       
-      Papa.parse(csvText, {
-        header: true,
-        skipEmptyLines: true,
-        complete: async (results) => {
-          const rows = results.data as any[];
-          if (rows.length === 0) {
-            setError("Không có dữ liệu trong Sheet.");
-            setIsLoading(false);
-            return;
-          }
-
-          // Helper to get value from row with flexible key matching
-          const getRowValue = (row: any, colName: string) => {
-            if (!colName) return "N/A";
-            const val = row[colName];
-            if (val !== undefined && val !== null && String(val).trim() !== "") return String(val).trim();
-            
-            // Fallback: try case-insensitive or trimmed match
-            const target = colName.trim().toLowerCase();
-            const actualKey = Object.keys(row).find(k => k.trim().toLowerCase() === target);
-            if (actualKey) {
-              const val2 = row[actualKey];
-              if (val2 !== undefined && val2 !== null && String(val2).trim() !== "") return String(val2).trim();
-            }
-            return "N/A";
-          };
-
-          try {
-            let count = 0;
-            const chunks = [];
-            for (let i = 0; i < rows.length; i += 15) {
-              chunks.push(rows.slice(i, i + 15));
+      return new Promise((resolve, reject) => {
+        Papa.parse(csvText, {
+          header: true,
+          skipEmptyLines: true,
+          complete: async (results) => {
+            const rows = results.data as any[];
+            if (rows.length === 0) {
+              setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
+              return resolve(0);
             }
 
-            for (const chunk of chunks) {
-              const subscribers = chunk.map(row => {
-                const phone = getRowValue(row, config.phoneColumn);
-                const status = getRowValue(row, config.statusColumn);
-                const updatedBy = getRowValue(row, config.updatedByUserColumn);
-                
-                if (phone && phone !== "N/A") {
-                  const last9 = getLast9Digits(phone);
-                  count++;
-                  return {
-                    last9Digits: last9,
-                    fullPhoneNumber: phone,
-                    status: status,
-                    updatedBy: updatedBy
-                  };
-                }
-                return null;
-              }).filter(s => s !== null);
+            // Helper to get value from row with flexible key matching
+            const getRowValue = (row: any, colName: string) => {
+              if (!colName) return "N/A";
+              const val = row[colName];
+              if (val !== undefined && val !== null && String(val).trim() !== "") return String(val).trim();
+              const target = colName.trim().toLowerCase();
+              const actualKey = Object.keys(row).find(k => k.trim().toLowerCase() === target);
+              if (actualKey) {
+                const val2 = row[actualKey];
+                if (val2 !== undefined && val2 !== null && String(val2).trim() !== "") return String(val2).trim();
+              }
+              return "N/A";
+            };
 
-              if (subscribers.length > 0) {
-                console.log("Sending batch to Cloudflare:", subscribers[0]);
-                const res = await fetch("/api/subscribers/batch", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ subscribers })
-                });
-                if (!res.ok) {
-                  const errData = await res.json().catch(() => ({}));
-                  console.error("Server Error Details:", errData);
-                  throw new Error(errData.error || `Lỗi Server (${res.status}): Không thể gửi dữ liệu lên Cloudflare`);
+            try {
+              let count = 0;
+              const chunks = [];
+              for (let i = 0; i < rows.length; i += 15) {
+                chunks.push(rows.slice(i, i + 15));
+              }
+
+              for (const chunk of chunks) {
+                const subscribers = chunk.map(row => {
+                  const phone = getRowValue(row, source.phoneColumn);
+                  const status = getRowValue(row, source.statusColumn);
+                  const updatedBy = getRowValue(row, source.updatedByUserColumn);
+                  
+                  if (phone && phone !== "N/A") {
+                    const last9 = getLast9Digits(phone);
+                    count++;
+                    return {
+                      last9Digits: last9,
+                      fullPhoneNumber: phone,
+                      status: status,
+                      updatedBy: updatedBy
+                    };
+                  }
+                  return null;
+                }).filter(s => s !== null);
+
+                if (subscribers.length > 0) {
+                  const res = await fetch("/api/subscribers/batch", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ subscribers })
+                  });
+                  if (!res.ok) throw new Error(`Lỗi đồng bộ nguồn ${sourceKey}`);
                 }
               }
+              setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
+              resolve(count);
+            } catch (err) {
+              setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
+              reject(err);
             }
-
-            // Save config
-            if (isAdminVerified) {
-              await fetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(config)
-              });
-            }
-            
-            setSuccess(`Đã cập nhật thành công ${count} bản ghi lên Cloudflare D1.`);
-          } catch (err: any) {
-            console.error("Import error:", err);
-            setError("Lỗi cập nhật dữ liệu: " + (err.message || "Vui lòng kiểm tra lại kết nối Cloudflare."));
-          } finally {
-            setIsLoading(false);
           }
-        },
-        error: (err: any) => {
-          setError("Lỗi xử lý dữ liệu: " + err.message);
-          setIsLoading(false);
-        }
+        });
       });
     } catch (err: any) {
-      setError("Lỗi kết nối: " + err.message);
+      setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
+      throw err;
+    }
+  };
+
+  // Import All Sources
+  const handleImportAll = async () => {
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
+    
+    let totalCount = 0;
+    const sourceKeys: (keyof AppConfig['sources'])[] = ['main', 'invalidDocs', 'id9Digits', 'others'];
+    
+    try {
+      for (const key of sourceKeys) {
+        setSuccess(`Đang xử lý: ${key === 'main' ? 'Tập mặc định' : key === 'invalidDocs' ? 'Sai giấy tờ' : key === 'id9Digits' ? 'CMND 9 số' : 'Khác'}...`);
+        const count = await handleImport(key);
+        totalCount += count;
+      }
+      
+      if (totalCount > 0) {
+        setSuccess(`Thành công! Tổng cộng đã import ${totalCount} bản ghi từ các nguồn.`);
+      } else {
+        setError("Không có dữ liệu nào được import. Vui lòng kiểm tra lại cấu hình các nguồn.");
+      }
+    } catch (err: any) {
+      setError("Quá trình import bị gián đoạn: " + err.message);
+    } finally {
       setIsLoading(false);
     }
   };
@@ -509,7 +526,7 @@ export default function App() {
                       </Button>
                     </div>
                   </CardHeader>
-                  <CardContent className="space-y-6 pt-6">
+                  <CardContent className="space-y-8 pt-6">
                     {/* Password Config */}
                     <div className="space-y-2 p-4 bg-slate-50 rounded-lg border border-slate-100">
                       <div className="flex justify-between items-center">
@@ -518,7 +535,7 @@ export default function App() {
                           Đổi mật khẩu Admin (Lưu vào CSDL)
                         </Label>
                         <Button variant="outline" size="sm" onClick={handleSaveOnly} disabled={isLoading}>
-                          Lưu mật khẩu
+                          {isLoading ? "Đang lưu..." : "Lưu mật khẩu"}
                         </Button>
                       </div>
                       <Input 
@@ -529,90 +546,124 @@ export default function App() {
                       />
                     </div>
 
-                    {/* Sheet Config */}
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <Label className="flex items-center gap-2">
-                            <Database className="w-4 h-4" />
-                            Link Google Sheet
-                          </Label>
-                          <div className="flex items-center gap-2 text-[10px] font-bold uppercase text-orange-600">
-                            <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse" />
-                            Cloudflare D1 Mode
+                    {/* Import Modules */}
+                    <div className="space-y-10">
+                      {(Object.entries({
+                        main: "Tập thuê bao mặc định",
+                        invalidDocs: "Tập thuê bao sai giấy tờ",
+                        id9Digits: "Tập thuê bao CMND 9 số",
+                        others: "Tập thuê bao khác"
+                      }) as [keyof AppConfig['sources'], string][]).map(([key, label]) => (
+                        <div key={key} className="space-y-4 border-l-4 border-blue-200 pl-4 py-2">
+                          <div className="flex justify-between items-center">
+                            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                              <Database className="w-5 h-5 text-blue-500" />
+                              {label}
+                            </h3>
+                            <div className="flex items-center gap-2">
+                              <Button 
+                                variant="secondary" 
+                                size="sm"
+                                onClick={() => readHeaders(key)} 
+                                disabled={loadingMap[key] || !config.sources[key].sheetUrl}
+                              >
+                                {loadingMap[key] ? "Đang đọc..." : "Đọc tiêu đề"}
+                              </Button>
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Input 
-                            placeholder="https://docs.google.com/spreadsheets/d/..." 
-                            value={config.sheetUrl}
-                            onChange={(e) => setConfig({...config, sheetUrl: e.target.value})}
-                          />
-                          <Button variant="secondary" onClick={readHeaders} disabled={isLoading || !config.sheetUrl}>
-                            {isLoading ? "Đang đọc..." : "Đọc tiêu đề"}
-                          </Button>
-                        </div>
-                      </div>
+                          
+                          <div className="space-y-2">
+                            <Label className="text-xs text-slate-500">Link Google Sheet</Label>
+                            <Input 
+                              placeholder="https://docs.google.com/spreadsheets/d/..." 
+                              value={config.sources[key].sheetUrl}
+                              onChange={(e) => {
+                                const newSources = { ...config.sources };
+                                newSources[key] = { ...newSources[key], sheetUrl: e.target.value };
+                                setConfig({ ...config, sources: newSources });
+                              }}
+                            />
+                          </div>
 
-                      {headers.length > 0 && (
-                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-blue-50/30 rounded-lg border border-blue-100">
-                          <div className="space-y-2">
-                            <Label className="flex items-center gap-2">
-                              <Phone className="w-4 h-4" />
-                              Cột Số thuê bao
-                            </Label>
-                            <select 
-                              className="w-full h-10 px-3 py-2 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              value={config.phoneColumn}
-                              onChange={(e) => setConfig({...config, phoneColumn: e.target.value})}
-                            >
-                              <option value="">-- Chọn cột --</option>
-                              {headers.map((h, idx) => <option key={`phone-${h}-${idx}`} value={h}>{h}</option>)}
-                            </select>
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="flex items-center gap-2">
-                              <Table className="w-4 h-4" />
-                              Cột Kết quả cập nhật
-                            </Label>
-                            <select 
-                              className="w-full h-10 px-3 py-2 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              value={config.statusColumn}
-                              onChange={(e) => setConfig({...config, statusColumn: e.target.value})}
-                            >
-                              <option value="">-- Chọn cột --</option>
-                              {headers.map((h, idx) => <option key={`status-${h}-${idx}`} value={h}>{h}</option>)}
-                            </select>
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="flex items-center gap-2">
-                              <User className="w-4 h-4" />
-                              Cột User cập nhật
-                            </Label>
-                            <select 
-                              className="w-full h-10 px-3 py-2 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              value={config.updatedByUserColumn}
-                              onChange={(e) => setConfig({...config, updatedByUserColumn: e.target.value})}
-                            >
-                              <option value="">-- Chọn cột --</option>
-                              {headers.map((h, idx) => <option key={`updatedBy-${h}-${idx}`} value={h}>{h}</option>)}
-                            </select>
-                          </div>
-                        </motion.div>
-                      )}
+                          {(headersMap[key] || []).length > 0 && (
+                            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-50 rounded-lg border border-slate-100">
+                              <div className="space-y-2">
+                                <Label className="text-xs flex items-center gap-2">
+                                  <Phone className="w-3 h-3" />
+                                  Số thuê bao
+                                </Label>
+                                <select 
+                                  className="w-full h-9 px-3 py-1 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  value={config.sources[key].phoneColumn}
+                                  onChange={(e) => {
+                                    const newSources = { ...config.sources };
+                                    newSources[key] = { ...newSources[key], phoneColumn: e.target.value };
+                                    setConfig({ ...config, sources: newSources });
+                                  }}
+                                >
+                                  <option value="">-- Chọn --</option>
+                                  {(headersMap[key] || []).map((h, idx) => (
+                                    <option key={`${key}-phone-${idx}`} value={h}>{h}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="space-y-2">
+                                <Label className="text-xs flex items-center gap-2">
+                                  <Table className="w-3 h-3" />
+                                  Kết quả
+                                </Label>
+                                <select 
+                                  className="w-full h-9 px-3 py-1 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  value={config.sources[key].statusColumn}
+                                  onChange={(e) => {
+                                    const newSources = { ...config.sources };
+                                    newSources[key] = { ...newSources[key], statusColumn: e.target.value };
+                                    setConfig({ ...config, sources: newSources });
+                                  }}
+                                >
+                                  <option value="">-- Chọn --</option>
+                                  {(headersMap[key] || []).map((h, idx) => (
+                                    <option key={`${key}-status-${idx}`} value={h}>{h}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="space-y-2">
+                                <Label className="text-xs flex items-center gap-2">
+                                  <User className="w-3 h-3" />
+                                  User cập nhật
+                                </Label>
+                                <select 
+                                  className="w-full h-9 px-3 py-1 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  value={config.sources[key].updatedByUserColumn}
+                                  onChange={(e) => {
+                                    const newSources = { ...config.sources };
+                                    newSources[key] = { ...newSources[key], updatedByUserColumn: e.target.value };
+                                    setConfig({ ...config, sources: newSources });
+                                  }}
+                                >
+                                  <option value="">-- Chọn --</option>
+                                  {(headersMap[key] || []).map((h, idx) => (
+                                    <option key={`${key}-user-${idx}`} value={h}>{h}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </motion.div>
+                          )}
+                        </div>
+                      ))}
                     </div>
 
-                    <div className="flex gap-4">
-                      <Button onClick={handleImport} className="flex-1 bg-slate-800 hover:bg-slate-900 h-12 text-lg" disabled={isLoading}>
+                    <div className="pt-6 border-t border-slate-100 flex gap-4">
+                      <Button onClick={handleImportAll} className="flex-1 bg-blue-600 hover:bg-blue-700 h-12 text-lg font-bold" disabled={isLoading}>
                         {isLoading ? (
                           <RefreshCw className="w-5 h-5 animate-spin mr-2" />
                         ) : (
                           <Database className="w-5 h-5 mr-2" />
                         )}
-                        Import dữ liệu từ Sheet
+                        Import toàn bộ dữ liệu
                       </Button>
-                      <Button onClick={handleSaveOnly} variant="outline" className="h-12 px-6 border-slate-200" disabled={isLoading}>
-                        Lưu cấu hình
+                      <Button onClick={handleSaveOnly} variant="outline" className="h-12 px-10 border-slate-200 text-slate-700" disabled={isLoading}>
+                        Lưu cấu hình nguồn
                       </Button>
                     </div>
                   </CardContent>
