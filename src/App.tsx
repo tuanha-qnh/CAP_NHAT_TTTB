@@ -212,9 +212,10 @@ export default function App() {
   const handleImport = async (sourceKey: keyof AppConfig['sources']): Promise<number> => {
     const source = config.sources[sourceKey];
     const sheetId = getSheetId(source.sheetUrl);
-    
+    const sourceLabel = sourceKey === 'main' ? 'Tập mặc định' : sourceKey === 'invalidDocs' ? 'Sai giấy tờ' : sourceKey === 'id9Digits' ? 'CMND 9 số' : 'Khác';
+
     if (!sheetId || !source.phoneColumn || !source.statusColumn || !source.updatedByUserColumn) {
-      console.log(`Bỏ qua module ${sourceKey} do chưa cấu hình đầy đủ.`);
+      console.log(`[Import] Bỏ qua module ${sourceLabel} do chưa cấu hình đầy đủ.`);
       return 0;
     }
 
@@ -223,6 +224,12 @@ export default function App() {
     try {
       const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&usp=sharing`;
       const response = await fetch(csvUrl);
+      const contentType = response.headers.get("content-type");
+      
+      if (contentType && contentType.includes("text/html")) {
+        throw new Error(`Dữ liệu nguồn "${sourceLabel}" không hợp lệ (Có thể Sheet chưa được chia sẻ công khai).`);
+      }
+
       const csvText = await response.text();
       
       return new Promise((resolve, reject) => {
@@ -230,27 +237,27 @@ export default function App() {
           header: true,
           skipEmptyLines: true,
           complete: async (results) => {
-            const rows = results.data as any[];
-            if (rows.length === 0) {
-              setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
-              return resolve(0);
-            }
-
-            // Helper to get value from row with flexible key matching
-            const getRowValue = (row: any, colName: string) => {
-              if (!colName) return "N/A";
-              const val = row[colName];
-              if (val !== undefined && val !== null && String(val).trim() !== "") return String(val).trim();
-              const target = colName.trim().toLowerCase();
-              const actualKey = Object.keys(row).find(k => k.trim().toLowerCase() === target);
-              if (actualKey) {
-                const val2 = row[actualKey];
-                if (val2 !== undefined && val2 !== null && String(val2).trim() !== "") return String(val2).trim();
-              }
-              return "N/A";
-            };
-
             try {
+              const rows = results.data as any[];
+              if (rows.length === 0) {
+                setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
+                return resolve(0);
+              }
+
+              // Helper to get value from row with flexible key matching
+              const getRowValue = (row: any, colName: string) => {
+                if (!colName) return "N/A";
+                const val = row[colName];
+                if (val !== undefined && val !== null && String(val).trim() !== "") return String(val).trim();
+                const target = colName.trim().toLowerCase();
+                const actualKey = Object.keys(row).find(k => k.trim().toLowerCase() === target);
+                if (actualKey) {
+                  const val2 = row[actualKey];
+                  if (val2 !== undefined && val2 !== null && String(val2).trim() !== "") return String(val2).trim();
+                }
+                return "N/A";
+              };
+
               let count = 0;
               const chunks = [];
               for (let i = 0; i < rows.length; i += 15) {
@@ -282,15 +289,22 @@ export default function App() {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ subscribers })
                   });
-                  if (!res.ok) throw new Error(`Lỗi đồng bộ nguồn ${sourceKey}`);
+                  if (!res.ok) {
+                    const errJson = await res.json().catch(() => ({}));
+                    throw new Error(errJson.error || `Lỗi API khi đồng bộ nguồn ${sourceLabel}`);
+                  }
                 }
               }
               setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
               resolve(count);
-            } catch (err) {
+            } catch (err: any) {
               setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
               reject(err);
             }
+          },
+          error: (error) => {
+            setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
+            reject(new Error(`Lỗi parse CSV nguồn ${sourceLabel}: ${error.message}`));
           }
         });
       });
@@ -304,25 +318,39 @@ export default function App() {
   const handleImportAll = async () => {
     setIsLoading(true);
     setError(null);
-    setSuccess(null);
+    setSuccess("Bắt đầu quá trình import toàn bộ...");
     
     let totalCount = 0;
     const sourceKeys: (keyof AppConfig['sources'])[] = ['main', 'invalidDocs', 'id9Digits', 'others'];
+    const results: string[] = [];
     
     try {
       for (const key of sourceKeys) {
-        setSuccess(`Đang xử lý: ${key === 'main' ? 'Tập mặc định' : key === 'invalidDocs' ? 'Sai giấy tờ' : key === 'id9Digits' ? 'CMND 9 số' : 'Khác'}...`);
-        const count = await handleImport(key);
-        totalCount += count;
+        const label = key === 'main' ? 'Tập mặc định' : key === 'invalidDocs' ? 'Sai giấy tờ' : key === 'id9Digits' ? 'CMND 9 số' : 'Khác';
+        setSuccess(`Đang xử lý nguồn: ${label}...`);
+        
+        try {
+          const count = await handleImport(key);
+          totalCount += count;
+          if (count > 0) {
+            results.push(`${label}: ${count} dòng`);
+          } else if (config.sources[key].sheetUrl) {
+            results.push(`${label}: 0 dòng (Bỏ qua hoặc không có dữ liệu)`);
+          }
+        } catch (sourceErr: any) {
+          console.error(`Lỗi tại nguồn ${label}:`, sourceErr);
+          results.push(`${label}: LỖI (${sourceErr.message})`);
+          // Tiếp tục với các nguồn khác thay vì dừng lại hoàn toàn
+        }
       }
       
-      if (totalCount > 0) {
-        setSuccess(`Thành công! Tổng cộng đã import ${totalCount} bản ghi từ các nguồn.`);
+      if (totalCount > 0 || results.length > 0) {
+        setSuccess(`Hoàn tất import! Tổng cộng: ${totalCount} bản ghi.\nChi tiết:\n${results.join('\n')}`);
       } else {
-        setError("Không có dữ liệu nào được import. Vui lòng kiểm tra lại cấu hình các nguồn.");
+        setError("Không có dữ liệu nào được import. Vui lòng kiểm tra cấu hình.");
       }
     } catch (err: any) {
-      setError("Quá trình import bị gián đoạn: " + err.message);
+      setError("Quá trình import gặp sự cố hệ thống: " + err.message);
     } finally {
       setIsLoading(false);
     }
