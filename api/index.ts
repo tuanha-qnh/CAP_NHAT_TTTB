@@ -87,6 +87,16 @@ app.post("/api/settings", async (req, res) => {
 });
 
 // API: Search Subscriber
+// Define stats BEFORE the parameterized route to avoid "stats" being caught as :last9
+app.get("/api/subscribers/stats", async (req, res) => {
+  try {
+    const result = await queryD1("SELECT COUNT(*) as total FROM subscribers");
+    res.json(result.results?.[0] || { total: 0 });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get("/api/subscribers/:last9", async (req, res) => {
   try {
     const result = await queryD1(
@@ -130,16 +140,6 @@ app.post("/api/subscribers/batch", async (req, res) => {
     res.json({ success: true, count: subscribers.length });
   } catch (error: any) {
     console.error("Batch Import Error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// API: Get Stats
-app.get("/api/subscribers/stats", async (req, res) => {
-  try {
-    const result = await queryD1("SELECT COUNT(*) as total FROM subscribers");
-    res.json(result.results?.[0] || { total: 0 });
-  } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });

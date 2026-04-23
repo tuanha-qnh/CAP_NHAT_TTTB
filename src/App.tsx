@@ -145,28 +145,36 @@ export default function App() {
   // Read Headers from Sheet
   const readHeaders = async (sourceKey: keyof AppConfig['sources']) => {
     const source = config.sources[sourceKey];
+    if (!source.sheetUrl) {
+      setError(`Vui lòng nhập Link Google Sheet cho module "${sourceKey}" trước.`);
+      return;
+    }
+
     const sheetId = getSheetId(source.sheetUrl);
     if (!sheetId) {
-      setError(`Link Google Sheet của module ${sourceKey} không hợp lệ.`);
+      setError(`Link Google Sheet của module "${sourceKey}" không hợp lệ (Không tìm thấy ID).`);
       return;
     }
 
     setLoadingMap(prev => ({ ...prev, [sourceKey]: true }));
     setError(null);
-    setHeadersMap(prev => ({ ...prev, [sourceKey]: [] }));
+    setSuccess(`Đang kết nối tới ID: ${sheetId.substring(0, 8)}...`);
 
     try {
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&usp=sharing`;
-      const response = await fetch(csvUrl);
+      // Adding cache buster to URL to ensure fresh headers
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&t=${Date.now()}`;
+      const response = await fetch(csvUrl, { cache: 'no-store' });
       
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.includes("text/html")) {
-        setError(`Lỗi: Không thể đọc dữ liệu ${sourceKey}. Vui lòng kiểm tra quyền chia sẻ của Google Sheet.`);
-        setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
-        return;
+        throw new Error("Dữ liệu không phải CSV. Hãy chắc chắn Sheet đã 'Chia sẻ với bất kỳ ai có liên kết' ở quyền Xem.");
       }
 
       const csvText = await response.text();
+      if (!csvText || csvText.includes("<!DOCTYPE html>")) {
+        throw new Error("Không thể đọc được dữ liệu CSV. Kiểm tra quyền chia sẻ.");
+      }
+
       Papa.parse(csvText, {
         header: false,
         preview: 1,
@@ -174,24 +182,30 @@ export default function App() {
         complete: (results) => {
           if (results.data && results.data.length > 0) {
             const rawHeaders = results.data[0] as string[];
-            const cleanHeaders = rawHeaders.filter(h => h && h.trim() !== "");
+            const cleanHeaders = rawHeaders.map(h => String(h || "").trim()).filter(h => h !== "");
+            
             if (cleanHeaders.length === 0) {
-              setError(`Không tìm thấy tiêu đề cột hợp lệ trong Sheet của ${sourceKey}.`);
+              setError(`Không tìm thấy tiêu đề cột trong Sheet của "${sourceKey}".`);
             } else {
-              setHeadersMap(prev => ({ ...prev, [sourceKey]: cleanHeaders }));
+              setHeadersMap(prev => {
+                const newMap = { ...prev };
+                newMap[sourceKey] = cleanHeaders;
+                return newMap;
+              });
+              setSuccess(`Đã đọc được ${cleanHeaders.length} tiêu đề cột từ nguồn "${sourceKey}".`);
             }
           } else {
-            setError(`Sheet của ${sourceKey} không có dữ liệu.`);
+            setError(`Sheet của "${sourceKey}" không có dữ liệu tiêu đề.`);
           }
           setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
         },
         error: (err: any) => {
-          setError(`Lỗi phân tích CSV (${sourceKey}): ` + err.message);
+          setError(`Lỗi phân tích nội dung (${sourceKey}): ` + err.message);
           setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
         }
       });
-    } catch (err) {
-      setError(`Không thể kết nối với Google Sheet của ${sourceKey}.`);
+    } catch (err: any) {
+      setError(`Lỗi kết nối nguồn "${sourceKey}": ` + err.message);
       setLoadingMap(prev => ({ ...prev, [sourceKey]: false }));
     }
   };
@@ -274,8 +288,8 @@ export default function App() {
     setLoadingMap(prev => ({ ...prev, [sourceKey]: true }));
 
     try {
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&usp=sharing`;
-      const response = await fetch(csvUrl);
+      const actualCsvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&t=${Date.now()}`;
+      const response = await fetch(actualCsvUrl, { cache: 'no-store' });
       const contentType = response.headers.get("content-type");
       
       if (contentType && contentType.includes("text/html")) {
