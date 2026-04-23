@@ -221,8 +221,8 @@ export default function App() {
   };
 
   // Import Data to Cloudflare
-  const handleImport = async (sourceKey: keyof AppConfig['sources']): Promise<number> => {
-    const source = config.sources[sourceKey];
+  const handleImport = async (sourceKey: keyof AppConfig['sources'], currentConfig: AppConfig): Promise<number> => {
+    const source = currentConfig.sources[sourceKey];
     const sheetId = getSheetId(source.sheetUrl);
     const sourceLabel = sourceKey === 'main' ? 'Tập mặc định' : sourceKey === 'invalidDocs' ? 'Sai giấy tờ' : sourceKey === 'id9Digits' ? 'CMND 9 số' : 'Khác';
 
@@ -259,24 +259,35 @@ export default function App() {
               // Helper to get value from row with flexible key matching
               const getRowValue = (row: any, colName: string) => {
                 if (!colName) return "N/A";
-                const val = row[colName];
-                if (val !== undefined && val !== null && String(val).trim() !== "") return String(val).trim();
+                
+                // 1. Direct match
+                if (row[colName] !== undefined && row[colName] !== null) {
+                  const val = String(row[colName]).trim();
+                  if (val !== "") return val;
+                }
+
+                // 2. Case-insensitive & Trimmed match
                 const target = colName.trim().toLowerCase();
                 const actualKey = Object.keys(row).find(k => k.trim().toLowerCase() === target);
                 if (actualKey) {
-                  const val2 = row[actualKey];
-                  if (val2 !== undefined && val2 !== null && String(val2).trim() !== "") return String(val2).trim();
+                  const val = row[actualKey];
+                  if (val !== undefined && val !== null && String(val).trim() !== "") return String(val).trim();
                 }
+                
                 return "N/A";
               };
 
               let count = 0;
               const chunks = [];
-              for (let i = 0; i < rows.length; i += 15) {
-                chunks.push(rows.slice(i, i + 15));
+              const batchSize = 100; // Safer batch size to avoid SQL length limits
+              for (let i = 0; i < rows.length; i += batchSize) {
+                chunks.push(rows.slice(i, i + batchSize));
               }
 
-              for (const chunk of chunks) {
+              for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i];
+                setSuccess(`Đang xử lý nguồn "${sourceLabel}": Phân đoạn ${i + 1}/${chunks.length}...`);
+                
                 const subscribers = chunk.map(row => {
                   const phone = getRowValue(row, source.phoneColumn);
                   const status = getRowValue(row, source.statusColumn);
@@ -284,13 +295,16 @@ export default function App() {
                   
                   if (phone && phone !== "N/A") {
                     const last9 = getLast9Digits(phone);
-                    count++;
-                    return {
-                      last9Digits: last9,
-                      fullPhoneNumber: phone,
-                      status: status,
-                      updatedBy: updatedBy
-                    };
+                    // Critical: only include if we have a valid last 9 digits to avoid PRIMARY KEY constraint issues
+                    if (last9 && last9.length >= 5) {
+                      count++;
+                      return {
+                        last9Digits: last9,
+                        fullPhoneNumber: phone,
+                        status: status,
+                        updatedBy: updatedBy
+                      };
+                    }
                   }
                   return null;
                 }).filter(s => s !== null);
@@ -338,11 +352,18 @@ export default function App() {
     
     try {
       for (const key of sourceKeys) {
+        const source = config.sources[key];
         const label = key === 'main' ? 'Tập mặc định' : key === 'invalidDocs' ? 'Sai giấy tờ' : key === 'id9Digits' ? 'CMND 9 số' : 'Khác';
-        setSuccess(`Đang xử lý nguồn: ${label}...`);
+        
+        if (!source.sheetUrl || !source.phoneColumn) {
+          results.push(`${label}: Chưa cấu hình (Bỏ qua)`);
+          continue;
+        }
+
+        setSuccess(`Đang kết nối tới nguồn "${label}"...`);
         
         try {
-          const count = await handleImport(key);
+          const count = await handleImport(key, config);
           totalCount += count;
           if (count > 0) {
             results.push(`${label}: ${count} dòng`);
@@ -366,6 +387,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
       fetchStats();
+      // Ensure the final summary is visible
     }
   };
 
