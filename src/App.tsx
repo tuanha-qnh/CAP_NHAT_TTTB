@@ -594,7 +594,7 @@ export default function App() {
                           Quản trị Hệ thống
                         </CardTitle>
                         <CardDescription className="text-slate-400">
-                          Tổng số dữ liệu: <span className="text-white font-bold">{totalRecords !== null ? totalRecords.toLocaleString() : "..."} bản ghi</span>
+                          Tổng số dữ liệu: <span className="text-white font-bold">{(typeof totalRecords === 'number') ? totalRecords.toLocaleString() : "..."} bản ghi</span>
                         </CardDescription>
                       </div>
                       <Button variant="ghost" size="sm" onClick={() => setIsAdminVerified(false)} className="text-slate-300 hover:text-white">
