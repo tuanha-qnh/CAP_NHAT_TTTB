@@ -90,11 +90,12 @@ app.post("/api/settings", async (req, res) => {
 app.get("/api/subscribers/:last9", async (req, res) => {
   try {
     const result = await queryD1(
-      "SELECT * FROM subscribers WHERE last9Digits = ?",
+      "SELECT * FROM subscribers WHERE last9Digits = ? ORDER BY status ASC",
       [req.params.last9]
     );
-    if (result && result.results && result.results.length > 0) {
-      res.json(result.results[0]);
+    // Return all results as an array
+    if (result && result.results) {
+      res.json(result.results);
     } else {
       res.status(404).json({ error: "Không tìm thấy thông tin cho số thuê bao này." });
     }
@@ -111,14 +112,11 @@ app.post("/api/subscribers/batch", async (req, res) => {
     return res.status(400).json({ error: "Dữ liệu không hợp lệ" });
   }
 
-  // Debug log for the first item
-  console.log("Importing batch, first item sample:", JSON.stringify(subscribers[0]));
-
   try {
-    let sql = "INSERT OR REPLACE INTO subscribers (last9Digits, fullPhoneNumber, status, updatedBy) VALUES ";
+    // Change to simple INSERT to allow duplicates
+    let sql = "INSERT INTO subscribers (last9Digits, fullPhoneNumber, status, updatedBy) VALUES ";
     const params: any[] = [];
     const placeholders = subscribers.map(s => {
-      // Ensure values are strings and not null/undefined
       const last9 = String(s.last9Digits || "");
       const phone = String(s.fullPhoneNumber || "");
       const status = String(s.status || "N/A");
@@ -133,8 +131,39 @@ app.post("/api/subscribers/batch", async (req, res) => {
     res.json({ success: true, count: subscribers.length });
   } catch (error: any) {
     console.error("Batch Import Error:", error);
-    console.error("SQL Sample:", sql.substring(0, 200));
-    console.error("Params Count:", params.length);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get Stats
+app.get("/api/subscribers/stats", async (req, res) => {
+  try {
+    const result = await queryD1("SELECT COUNT(*) as total FROM subscribers");
+    res.json(result.results?.[0] || { total: 0 });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Reset Database (Emergency/Migration)
+app.post("/api/admin/reset-db", async (req, res) => {
+  try {
+    // Sequence of commands to rebuild table
+    await queryD1("DROP TABLE IF EXISTS subscribers");
+    await queryD1(`
+      CREATE TABLE subscribers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        last9Digits TEXT,
+        fullPhoneNumber TEXT,
+        status TEXT,
+        updatedBy TEXT
+      )
+    `);
+    await queryD1("CREATE INDEX idx_last9 ON subscribers(last9Digits)");
+    
+    res.json({ success: true, message: "Đã làm mới cơ sở dữ liệu thành công." });
+  } catch (error: any) {
+    console.error("Reset DB Error:", error);
     res.status(500).json({ error: error.message });
   }
 });

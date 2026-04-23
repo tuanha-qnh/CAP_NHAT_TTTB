@@ -65,16 +65,28 @@ export default function App() {
   
   // App State
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResult, setSearchResult] = useState<SubscriberData | null>(null);
+  const [searchResults, setSearchResults] = useState<SubscriberData[]>([]);
+  const [totalRecords, setTotalRecords] = useState<number | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Initial Load: Fetch Config from Cloudflare
+  // Initial Load: Fetch Config & Stats
+  const fetchStats = async () => {
+    try {
+      const res = await fetch("/api/subscribers/stats");
+      if (res.ok) {
+        const data = await res.json();
+        setTotalRecords(data.total);
+      }
+    } catch (e) {}
+  };
+
   useEffect(() => {
-    const fetchConfig = async () => {
+    const init = async () => {
+      fetchStats();
       try {
         const response = await fetch("/api/settings");
         if (response.ok) {
@@ -103,7 +115,7 @@ export default function App() {
         console.error("Failed to fetch config:", err);
       }
     };
-    fetchConfig();
+    init();
   }, []);
 
   // Helper: Extract Last 9 Digits
@@ -353,6 +365,33 @@ export default function App() {
       setError("Quá trình import gặp sự cố hệ thống: " + err.message);
     } finally {
       setIsLoading(false);
+      fetchStats();
+    }
+  };
+
+  // Reset Database logic
+  const handleResetDB = async () => {
+    if (!window.confirm("CẢNH BÁO: Hành động này sẽ XÓA TOÀN BỘ dữ liệu hiện tại để làm mới cấu trúc bảng (hỗ trợ lưu trùng lặp). Bạn có chắc chắn muốn thực hiện?")) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const res = await fetch("/api/admin/reset-db", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccess("Đã làm mới cơ sở dữ liệu! Bây giờ bạn có thể bấm 'Import toàn bộ dữ liệu'.");
+        fetchStats();
+      } else {
+        setError(data.error || "Lỗi khi reset database.");
+      }
+    } catch (err: any) {
+      setError("Lỗi kết nối: " + err.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -362,12 +401,12 @@ export default function App() {
     if (!searchQuery.trim()) return;
 
     setIsSearching(true);
-    setSearchResult(null);
+    setSearchResults([]);
     setError(null);
 
     const last9 = getLast9Digits(searchQuery);
-    if (last9.length < 9) {
-      setError("Số điện thoại không hợp lệ (cần ít nhất 9 chữ số).");
+    if (last9.length < 5) {
+      setError("Vui lòng nhập ít nhất 5 số cuối của thuê bao.");
       setIsSearching(false);
       return;
     }
@@ -376,7 +415,7 @@ export default function App() {
       const response = await fetch(`/api/subscribers/${last9}`);
       if (response.ok) {
         const data = await response.json();
-        setSearchResult(data);
+        setSearchResults(Array.isArray(data) ? data : [data]);
       } else {
         const errorData = await response.json().catch(() => ({}));
         setError(errorData.error || "Không tìm thấy thông tin cho số thuê bao này.");
@@ -444,32 +483,40 @@ export default function App() {
               </p>
 
               <AnimatePresence mode="wait">
-                {searchResult && (
+                {searchResults.length > 0 && (
                   <motion.div 
-                    key="search-result"
+                    key="search-results"
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                    className="mt-6"
+                    className="mt-6 space-y-4"
                   >
-                    <Alert className="bg-green-50 border-green-200 text-green-800">
-                      <CheckCircle2 className="h-5 w-5 text-green-600" />
-                      <AlertTitle className="text-lg font-bold">Kết quả tìm thấy!</AlertTitle>
-                      <AlertDescription className="mt-2 space-y-2">
-                        <div className="flex justify-between border-b border-green-100 pb-2">
-                          <span className="opacity-70">Số thuê bao:</span>
-                          <span className="font-mono font-bold">{searchResult.fullPhoneNumber}</span>
+                    <div className="flex items-center justify-between px-2">
+                       <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                        Kết quả tìm thấy ({searchResults.length})
+                       </h3>
+                    </div>
+                    {searchResults.map((result, idx) => (
+                      <Alert key={`res-${idx}`} className="bg-white border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="w-full">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] font-bold uppercase text-slate-400">Số thuê bao</span>
+                              <span className="font-mono font-bold text-blue-700">{result.fullPhoneNumber}</span>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] font-bold uppercase text-slate-400">User cập nhật</span>
+                              <span className="font-medium text-slate-700">{result.updatedBy}</span>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] font-bold uppercase text-slate-400">Trạng thái</span>
+                              <span className="font-bold text-green-700">{result.status}</span>
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex justify-between border-b border-green-100 pb-2">
-                          <span className="opacity-70">User cập nhật:</span>
-                          <span className="font-medium">{searchResult.updatedBy}</span>
-                        </div>
-                        <div className="flex justify-between pt-1">
-                          <span className="opacity-70">Trạng thái:</span>
-                          <span className="font-bold text-green-700">{searchResult.status}</span>
-                        </div>
-                      </AlertDescription>
-                    </Alert>
+                      </Alert>
+                    ))}
                   </motion.div>
                 )}
 
@@ -539,16 +586,18 @@ export default function App() {
             ) : (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
                 <Card className="border-2 border-blue-100 shadow-lg">
-                  <CardHeader className="bg-blue-50/50">
+                  <CardHeader className="bg-slate-800 text-white rounded-t-xl py-6">
                     <div className="flex justify-between items-center">
                       <div>
-                        <CardTitle className="text-slate-800 flex items-center gap-2">
-                          <Settings className="w-5 h-5 text-blue-600" />
-                          Cấu hình dữ liệu (Admin)
+                        <CardTitle className="flex items-center gap-2">
+                          <Settings className="w-5 h-5 text-blue-400" />
+                          Quản trị Hệ thống
                         </CardTitle>
-                        <CardDescription>Thiết lập nguồn dữ liệu và mật khẩu hệ thống</CardDescription>
+                        <CardDescription className="text-slate-400">
+                          Tổng số dữ liệu: <span className="text-white font-bold">{totalRecords !== null ? totalRecords.toLocaleString() : "..."} bản ghi</span>
+                        </CardDescription>
                       </div>
-                      <Button variant="ghost" size="sm" onClick={() => setIsAdminVerified(false)} className="text-slate-500">
+                      <Button variant="ghost" size="sm" onClick={() => setIsAdminVerified(false)} className="text-slate-300 hover:text-white">
                         <LogOut className="w-4 h-4 mr-2" />
                         Thoát Admin
                       </Button>
@@ -693,6 +742,26 @@ export default function App() {
                       <Button onClick={handleSaveOnly} variant="outline" className="h-12 px-10 border-slate-200 text-slate-700" disabled={isLoading}>
                         Lưu cấu hình nguồn
                       </Button>
+                    </div>
+
+                    <div className="mt-10 pt-6 border-t border-red-100">
+                      <div className="flex items-center justify-between p-4 bg-red-50 rounded-lg border border-red-100">
+                        <div>
+                          <h4 className="text-red-800 font-bold flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4" />
+                            Khu vực nguy hiểm
+                          </h4>
+                          <p className="text-xs text-red-600 mt-1">Sử dụng khi cần thay đổi cấu trúc bảng hoặc xóa sạch dữ liệu để nạp lại từ đầu.</p>
+                        </div>
+                        <Button 
+                          onClick={handleResetDB} 
+                          variant="destructive" 
+                          size="sm"
+                          disabled={isLoading}
+                        >
+                          Làm mới bảng dữ liệu
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                   <CardFooter className="text-xs text-slate-400 border-t border-slate-100 pt-4">
