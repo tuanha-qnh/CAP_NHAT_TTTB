@@ -31,11 +31,9 @@ async function queryD1(sql: string, params: any[] = []) {
 
   const data = await response.json();
   if (!response.ok) {
-    const msg = data.errors?.[0]?.message || data.error || "D1 Query Error";
-    if (msg.includes("no such table")) {
-      throw new Error("Lỗi: Bảng dữ liệu chưa tồn tại trong Cloudflare D1. Vui lòng chạy lệnh SQL tạo bảng.");
-    }
-    throw new Error(msg);
+    const errorMsg = data.errors?.[0]?.message || data.error || "D1 Query Error";
+    console.error("D1 Error Detail:", data);
+    throw new Error(`Cloudflare D1: ${errorMsg}`);
   }
   return data.result?.[0] || data;
 }

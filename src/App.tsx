@@ -333,7 +333,7 @@ export default function App() {
 
               let count = 0;
               const chunks = [];
-              const batchSize = 100; // Safer batch size to avoid SQL length limits
+              const batchSize = 20; // D1 limit is 100 parameters; 20 rows * 4 cols = 80 params (Safe)
               for (let i = 0; i < rows.length; i += batchSize) {
                 chunks.push(rows.slice(i, i + batchSize));
               }
