@@ -90,12 +90,11 @@ app.post("/api/settings", async (req, res) => {
 app.get("/api/subscribers/:last9", async (req, res) => {
   try {
     const result = await queryD1(
-      "SELECT * FROM subscribers WHERE last9Digits = ? ORDER BY status ASC",
+      "SELECT * FROM subscribers WHERE last9Digits = ? LIMIT 1",
       [req.params.last9]
     );
-    // Return all results as an array
-    if (result && result.results) {
-      res.json(result.results);
+    if (result && result.results && result.results.length > 0) {
+      res.json(result.results[0]);
     } else {
       res.status(404).json({ error: "Không tìm thấy thông tin cho số thuê bao này." });
     }
@@ -113,8 +112,8 @@ app.post("/api/subscribers/batch", async (req, res) => {
   }
 
   try {
-    // Change to simple INSERT to allow duplicates
-    let sql = "INSERT INTO subscribers (last9Digits, fullPhoneNumber, status, updatedBy) VALUES ";
+    // Use INSERT OR REPLACE to keep database unique and save rows
+    let sql = "INSERT OR REPLACE INTO subscribers (last9Digits, fullPhoneNumber, status, updatedBy) VALUES ";
     const params: any[] = [];
     const placeholders = subscribers.map(s => {
       const last9 = String(s.last9Digits || "");
@@ -148,20 +147,18 @@ app.get("/api/subscribers/stats", async (req, res) => {
 // API: Reset Database (Emergency/Migration)
 app.post("/api/admin/reset-db", async (req, res) => {
   try {
-    // Sequence of commands to rebuild table
+    // Sequence of commands to rebuild table with UNIQUE constraint
     await queryD1("DROP TABLE IF EXISTS subscribers");
     await queryD1(`
       CREATE TABLE subscribers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        last9Digits TEXT,
+        last9Digits TEXT PRIMARY KEY,
         fullPhoneNumber TEXT,
         status TEXT,
         updatedBy TEXT
       )
     `);
-    await queryD1("CREATE INDEX idx_last9 ON subscribers(last9Digits)");
     
-    res.json({ success: true, message: "Đã làm mới cơ sở dữ liệu thành công." });
+    res.json({ success: true, message: "Đã làm mới cơ sở dữ liệu thành công (Chế độ tối ưu hóa trùng lặp)." });
   } catch (error: any) {
     console.error("Reset DB Error:", error);
     res.status(500).json({ error: error.message });

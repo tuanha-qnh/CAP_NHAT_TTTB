@@ -65,7 +65,7 @@ export default function App() {
   
   // App State
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SubscriberData[]>([]);
+  const [searchResult, setSearchResult] = useState<SubscriberData | null>(null);
   const [totalRecords, setTotalRecords] = useState<number | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
@@ -401,7 +401,7 @@ export default function App() {
     if (!searchQuery.trim()) return;
 
     setIsSearching(true);
-    setSearchResults([]);
+    setSearchResult(null);
     setError(null);
 
     const last9 = getLast9Digits(searchQuery);
@@ -415,7 +415,7 @@ export default function App() {
       const response = await fetch(`/api/subscribers/${last9}`);
       if (response.ok) {
         const data = await response.json();
-        setSearchResults(Array.isArray(data) ? data : [data]);
+        setSearchResult(data);
       } else {
         const errorData = await response.json().catch(() => ({}));
         setError(errorData.error || "Không tìm thấy thông tin cho số thuê bao này.");
@@ -478,45 +478,39 @@ export default function App() {
               <p className="mt-3 text-red-600 text-sm font-medium flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
                 <span>
-                  <strong>Lưu ý:</strong> Chỉ nhập các số điện thoại nằm trong danh sách phân giao về cho đơn vị thực hiện. <strong>KHÔNG NHẬP</strong> các số nằm ngoài danh sách.
+                  <strong>Ghi chú:</strong> Trường hợp tìm kiếm không thấy thuê bao thì có thể thuê bao chưa nằm trong danh sách phải chuẩn hóa.
                 </span>
               </p>
 
               <AnimatePresence mode="wait">
-                {searchResults.length > 0 && (
+                {searchResult && (
                   <motion.div 
-                    key="search-results"
+                    key="search-result"
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                    className="mt-6 space-y-4"
+                    className="mt-6"
                   >
-                    <div className="flex items-center justify-between px-2">
-                       <h3 className="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-green-500" />
-                        Kết quả tìm thấy ({searchResults.length})
-                       </h3>
-                    </div>
-                    {searchResults.map((result, idx) => (
-                      <Alert key={`res-${idx}`} className="bg-white border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-                        <div className="w-full">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div className="flex flex-col gap-1">
-                              <span className="text-[10px] font-bold uppercase text-slate-400">Số thuê bao</span>
-                              <span className="font-mono font-bold text-blue-700">{result.fullPhoneNumber}</span>
-                            </div>
-                            <div className="flex flex-col gap-1">
-                              <span className="text-[10px] font-bold uppercase text-slate-400">User cập nhật</span>
-                              <span className="font-medium text-slate-700">{result.updatedBy}</span>
-                            </div>
-                            <div className="flex flex-col gap-1">
-                              <span className="text-[10px] font-bold uppercase text-slate-400">Trạng thái</span>
-                              <span className="font-bold text-green-700">{result.status}</span>
-                            </div>
-                          </div>
+                    <Alert className="bg-green-50 border-green-200 text-green-800 shadow-sm">
+                      <div className="flex items-center gap-2 mb-2">
+                        <CheckCircle2 className="h-5 w-5 text-green-600" />
+                        <h3 className="text-lg font-bold">Kết quả tìm thấy!</h3>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 bg-white p-4 rounded-lg border border-green-100">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400">Số thuê bao</span>
+                          <span className="font-mono font-bold text-blue-700">{searchResult.fullPhoneNumber}</span>
                         </div>
-                      </Alert>
-                    ))}
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400">User cập nhật</span>
+                          <span className="font-medium text-slate-700">{searchResult.updatedBy}</span>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400">Kết quả cập nhật</span>
+                          <span className="font-bold text-green-700">{searchResult.status}</span>
+                        </div>
+                      </div>
+                    </Alert>
                   </motion.div>
                 )}
 
