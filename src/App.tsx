@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, FormEvent } from "react";
-import { Search, Settings, RefreshCw, CheckCircle2, AlertCircle, Phone, Lock, LogOut, Database, Table, User } from "lucide-react";
+import { Search, Settings, RefreshCw, CheckCircle2, AlertCircle, Phone, Lock, LogOut, Database, Table, User, Save, ArrowUpCircle, CheckSquare } from "lucide-react";
 import Papa from "papaparse";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -196,7 +196,7 @@ export default function App() {
     }
   };
 
-  // Save Config Only
+  // Save All Config (General)
   const handleSaveOnly = async () => {
     setIsLoading(true);
     setError(null);
@@ -207,14 +207,54 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config)
       });
-      
-      if (!response.ok) {
-        throw new Error("Lỗi khi lưu cấu hình lên Server.");
-      }
-      
+      if (!response.ok) throw new Error("Lỗi khi lưu cấu hình lên Server.");
       setSuccess("Đã lưu cấu hình thành công.");
     } catch (err: any) {
       setError("Lỗi lưu cấu hình: " + err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Save Specific Source Config
+  const handleSaveSource = async (key: keyof AppConfig['sources']) => {
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config)
+      });
+      
+      if (!response.ok) throw new Error("Lỗi khi lưu lên Server.");
+      
+      const label = key === 'main' ? 'Tập mặc định' : key === 'invalidDocs' ? 'Sai giấy tờ' : key === 'id9Digits' ? 'CMND 9 số' : 'Khác';
+      setSuccess(`Đã lưu cấu hình cho nguồn "${label}" thành công.`);
+    } catch (err: any) {
+      setError("Lỗi lưu cấu hình: " + err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Import Single Source
+  const handleImportSingle = async (key: keyof AppConfig['sources']) => {
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
+    
+    try {
+      const label = key === 'main' ? 'Tập mặc định' : key === 'invalidDocs' ? 'Sai giấy tờ' : key === 'id9Digits' ? 'CMND 9 số' : 'Khác';
+      setSuccess(`Đang bắt đầu import nguồn "${label}"...`);
+      
+      const count = await handleImport(key, config);
+      
+      fetchStats();
+      setSuccess(`Hoàn tất! Đã nạp thành công ${count.toLocaleString()} bản ghi từ nguồn "${label}". Hệ thống đã tự động gộp/ghi đè nếu trùng số thuê bao.`);
+    } catch (err: any) {
+      setError(`Lỗi khi import: ${err.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -640,35 +680,60 @@ export default function App() {
                     </div>
 
                     {/* Import Modules */}
-                    <div className="space-y-10">
+                    <div className="space-y-8">
                       {(Object.entries({
                         main: "Tập thuê bao mặc định",
                         invalidDocs: "Tập thuê bao sai giấy tờ",
                         id9Digits: "Tập thuê bao CMND 9 số",
                         others: "Tập thuê bao khác"
                       }) as [keyof AppConfig['sources'], string][]).map(([key, label]) => (
-                        <div key={key} className="space-y-4 border-l-4 border-blue-200 pl-4 py-2">
-                          <div className="flex justify-between items-center">
+                        <div key={key} className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm space-y-5 transition-all hover:border-blue-200">
+                          <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                             <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                              <Database className="w-5 h-5 text-blue-500" />
+                              <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
+                                <Database className="w-5 h-5" />
+                              </div>
                               {label}
                             </h3>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <Button 
-                                variant="secondary" 
+                                variant="outline" 
                                 size="sm"
+                                className="h-9 border-slate-200 text-slate-600 hover:bg-slate-50"
                                 onClick={() => readHeaders(key)} 
-                                disabled={loadingMap[key] || !config.sources[key].sheetUrl}
+                                disabled={loadingMap[key]}
                               >
-                                {loadingMap[key] ? "Đang đọc..." : "Đọc tiêu đề"}
+                                {loadingMap[key] ? <RefreshCw className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Table className="w-3.5 h-3.5 mr-1.5" />}
+                                Đọc tiêu đề
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                className="h-9 border-blue-100 text-blue-600 hover:bg-blue-50"
+                                onClick={() => handleSaveSource(key)} 
+                                disabled={isLoading}
+                              >
+                                <Save className="w-3.5 h-3.5 mr-1.5" />
+                                Lưu cấu hình
+                              </Button>
+                              <Button 
+                                variant="default" 
+                                size="sm"
+                                className="h-9 bg-blue-600 hover:bg-blue-700 shadow-sm"
+                                onClick={() => handleImportSingle(key)} 
+                                disabled={isLoading || !config.sources[key].sheetUrl || !config.sources[key].phoneColumn}
+                              >
+                                {isLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <ArrowUpCircle className="w-3.5 h-3.5 mr-1.5" />}
+                                Import dữ liệu
                               </Button>
                             </div>
                           </div>
                           
                           <div className="space-y-2">
-                            <Label className="text-xs text-slate-500">Link Google Sheet</Label>
+                            <Label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider">Link Google Sheet công khai</Label>
                             <Input 
                               placeholder="https://docs.google.com/spreadsheets/d/..." 
+                              className="bg-slate-50 border-slate-100 focus:bg-white transition-all"
                               value={config.sources[key].sheetUrl}
                               onChange={(e) => {
                                 const newSources = { ...config.sources };
@@ -679,14 +744,14 @@ export default function App() {
                           </div>
 
                           {(headersMap[key] || []).length > 0 && (
-                            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-50 rounded-lg border border-slate-100">
+                            <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-blue-50/50 rounded-lg border border-blue-100">
                               <div className="space-y-2">
-                                <Label className="text-xs flex items-center gap-2">
-                                  <Phone className="w-3 h-3" />
-                                  Số thuê bao
+                                <Label className="text-xs font-medium text-slate-600 flex items-center gap-2">
+                                  <Phone className="w-3 h-3 text-blue-500" />
+                                  Cột Số thuê bao
                                 </Label>
                                 <select 
-                                  className="w-full h-9 px-3 py-1 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  className="w-full h-9 px-3 py-1 bg-white border border-blue-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
                                   value={config.sources[key].phoneColumn}
                                   onChange={(e) => {
                                     const newSources = { ...config.sources };
@@ -694,19 +759,19 @@ export default function App() {
                                     setConfig({ ...config, sources: newSources });
                                   }}
                                 >
-                                  <option value="">-- Chọn --</option>
+                                  <option value="">-- Chọn cột --</option>
                                   {(headersMap[key] || []).map((h, idx) => (
                                     <option key={`${key}-phone-${idx}`} value={h}>{h}</option>
                                   ))}
                                 </select>
                               </div>
                               <div className="space-y-2">
-                                <Label className="text-xs flex items-center gap-2">
-                                  <Table className="w-3 h-3" />
-                                  Kết quả
+                                <Label className="text-xs font-medium text-slate-600 flex items-center gap-2">
+                                  <CheckSquare className="w-3 h-3 text-blue-500" />
+                                  Cột Kết quả
                                 </Label>
                                 <select 
-                                  className="w-full h-9 px-3 py-1 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  className="w-full h-9 px-3 py-1 bg-white border border-blue-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
                                   value={config.sources[key].statusColumn}
                                   onChange={(e) => {
                                     const newSources = { ...config.sources };
@@ -714,19 +779,19 @@ export default function App() {
                                     setConfig({ ...config, sources: newSources });
                                   }}
                                 >
-                                  <option value="">-- Chọn --</option>
+                                  <option value="">-- Chọn cột --</option>
                                   {(headersMap[key] || []).map((h, idx) => (
                                     <option key={`${key}-status-${idx}`} value={h}>{h}</option>
                                   ))}
                                 </select>
                               </div>
                               <div className="space-y-2">
-                                <Label className="text-xs flex items-center gap-2">
-                                  <User className="w-3 h-3" />
-                                  User cập nhật
+                                <Label className="text-xs font-medium text-slate-600 flex items-center gap-2">
+                                  <User className="w-3 h-3 text-blue-500" />
+                                  Cột User cập nhật
                                 </Label>
                                 <select 
-                                  className="w-full h-9 px-3 py-1 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  className="w-full h-9 px-3 py-1 bg-white border border-blue-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
                                   value={config.sources[key].updatedByUserColumn}
                                   onChange={(e) => {
                                     const newSources = { ...config.sources };
@@ -734,7 +799,7 @@ export default function App() {
                                     setConfig({ ...config, sources: newSources });
                                   }}
                                 >
-                                  <option value="">-- Chọn --</option>
+                                  <option value="">-- Chọn cột --</option>
                                   {(headersMap[key] || []).map((h, idx) => (
                                     <option key={`${key}-user-${idx}`} value={h}>{h}</option>
                                   ))}
@@ -746,17 +811,10 @@ export default function App() {
                       ))}
                     </div>
 
-                    <div className="pt-6 border-t border-slate-100 flex gap-4">
-                      <Button onClick={handleImportAll} className="flex-1 bg-blue-600 hover:bg-blue-700 h-12 text-lg font-bold" disabled={isLoading}>
-                        {isLoading ? (
-                          <RefreshCw className="w-5 h-5 animate-spin mr-2" />
-                        ) : (
-                          <Database className="w-5 h-5 mr-2" />
-                        )}
-                        Import toàn bộ dữ liệu
-                      </Button>
-                      <Button onClick={handleSaveOnly} variant="outline" className="h-12 px-10 border-slate-200 text-slate-700" disabled={isLoading}>
-                        Lưu cấu hình nguồn
+                    <div className="pt-6 border-t border-slate-100 flex flex-col md:flex-row gap-4">
+                      <Button onClick={handleImportAll} variant="outline" className="flex-1 border-blue-200 text-blue-700 h-12 font-bold" disabled={isLoading}>
+                        <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                        Import đồng thời tất cả các nguồn (Tự động)
                       </Button>
                     </div>
 
